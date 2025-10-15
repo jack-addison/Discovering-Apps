@@ -1,0 +1,110 @@
+# Apple App Store Scraper
+
+Stage 1 delivers a lightweight Python scraper that harvests metadata for iOS apps and stores it in a SQLite database under `exports/app_store_apps.db`.
+
+## Features
+- Keyword search, single chart pulls, or full-category sweeps over (`top-free`, `top-paid`, `top-grossing`).
+- Captures category, review score, description, and an estimated download count (rating count proxy).
+- Persists results with metadata such as developer, price, languages, artwork URL, plus JSON chart membership data per app.
+- Idempotent upserts so repeated runs refresh existing rows.
+
+> Apple does not expose real download totals. The `number_of_downloads` column stores the public rating count as a conservative proxy. Stage 2 can swap in a truer metric if a source becomes available.
+
+## Getting Started
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Run a keyword scrape:
+
+```bash
+python app_store_scraper.py --search-term "productivity" --limit 25
+```
+
+Gather a chart:
+
+```bash
+python app_store_scraper.py --collection top-free --country us --limit 50
+```
+
+Harvest the top 100 apps for every category (default limit is 100):
+
+```bash
+python app_store_scraper.py --collection top-free --all-categories
+```
+
+The SQLite database lives at `exports/app_store_apps.db`. Inspect it with the built-in shell:
+
+```bash
+sqlite3 exports/app_store_apps.db "SELECT name, category, review_score, number_of_downloads FROM apps LIMIT 5;"
+```
+
+When you sweep every category, the `chart_memberships` column stores a JSON array like:
+
+```json
+[{"chart_type": "top-free", "category_id": "6018", "category_name": "Books", "rank": 3}]
+```
+
+## Stage 2: LLM Scoring
+
+Use the Stage 2 script to enrich each app with estimated build time and success potential:
+
+```bash
+export OPENAI_API_KEY=sk-...
+python app_stage2_analysis.py
+```
+
+### Getting an OpenAI API key
+- Create an OpenAI account (https://platform.openai.com/) and visit **Dashboard → API keys**.
+- Generate a new secret key and copy it immediately; you can only view it once.
+- **Do not** commit the key to source control. Store it in a password manager or `.env` file that remains local.
+
+### Supplying the key to the script
+- **macOS/Linux (bash/zsh)**  
+  ```bash
+  export OPENAI_API_KEY="sk-your-key"
+  python app_stage2_analysis.py
+  ```
+- **macOS/Linux (Fish shell)**  
+  ```fish
+  set -x OPENAI_API_KEY "sk-your-key"
+  python app_stage2_analysis.py
+  ```
+- **Windows PowerShell**  
+  ```powershell
+  setx OPENAI_API_KEY "sk-your-key"
+  # restart your shell, then:
+  python app_stage2_analysis.py
+  ```
+- **Windows CMD (temporary for session)**  
+  ```cmd
+  set OPENAI_API_KEY=sk-your-key
+  python app_stage2_analysis.py
+  ```
+- For reusable workflows, place the export in your shell profile or use a local `.env` file with a loader (e.g., `python -m dotenv run -- app_stage2_analysis.py`), but keep that file out of version control.
+
+Key notes:
+- The script adds `build_time_estimate` and `success_score` columns if they are missing, then iterates apps (skipping already scored rows unless you pass `--force`).
+- It prompts an OpenAI model (default `gpt-4.1-mini`) with app metadata, asking for an MVP build-time estimate and a 0–100 success score. Adjust the model with `--model`.
+- Progress logs appear every 20 apps; you can limit runs with `--max-apps` for dry runs.
+- Handle rate limits automatically with retry/back-off (configure via `--max-retries` and `--retry-wait`).
+
+### How the scoring prompt works
+- **Build time estimate**: The LLM receives the app’s description, category, pricing, chart position, and language coverage, then estimates the weeks a small senior team would need to ship a minimal viable product. Infrastructure is assumed to be greenfield, so complex integrations or rich content tend to raise the estimate.
+- **Success score (0–100)**: The model balances market signals (rating average, rating volume/download proxy, chart ranks, developer reputation) against the qualitative description. High review count + strong ratings + popular categories push the score upward; sparse feedback or niche ideas drag it down.
+- **Reasoning string**: Each response includes a short justification for GPT’s numbers. We store only the numeric fields in SQLite, but the reasoning is logged for debugging.
+- **Quick-win definition**: Throughout the tooling, “quick wins” refers to `build_time_estimate ≤ 12` and `success_score ≥ 70`. This threshold powers the shading in the plots and the leaderboard filters.
+
+## Stage 3: Visualising Outcomes
+
+- Static preview: `python visualize_scores.py` renders `visualizations/success_vs_build_time.png`.
+- Interactive dashboard: `python visualize_scores_interactive.py --open` writes an HTML scatter plot to `visualizations/success_vs_build_time.html` and opens it in your browser. Categories are split into free/paid variants, and you can use flags such as `--min-ratings 500`, `--max-build-time 16`, `--min-success 70`, or `--quick-wins-only` to focus on specific cohorts.
+- Streamlit app: `streamlit run streamlit_app.py` launches an interactive workspace with filter controls (category, price tier, rating volume, build time, success score, quick wins toggle), configurable 2D/3D scatter plots (choose axes, colour, bubble size), category summary bars, distribution box plots, and a quick-win leaderboard.
+- Hover a point to inspect the app’s scores, ratings volume, review average, and price. Toggle categories via the legend to declutter the view. The shaded quadrant highlights quick wins (high success score, low build effort).
+
+## Next steps
+- Schedule recurring Stage 1 scrapes (cron, CI) so your dataset stays fresh.
+- Feed the Stage 2 scores into downstream analyses (e.g., prioritisation dashboards or deeper GPT summaries).
