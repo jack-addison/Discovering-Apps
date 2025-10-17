@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from openai import APIError, OpenAI, RateLimitError
 
+DEFAULT_DB_PATH = Path("exports") / "app_store_apps_v2.db"
 DEFAULT_MODEL = "gpt-4.1-mini"
 DEFAULT_SLEEP_SECONDS = 5
 SYSTEM_PROMPT = (
@@ -43,6 +44,7 @@ App metadata:
 
 @dataclass
 class AppRecord:
+    run_id: int
     track_id: int
     name: str
     category: Optional[str]
@@ -57,6 +59,7 @@ class AppRecord:
     chart_memberships: Optional[str]
     existing_build_time: Optional[float]
     existing_success_score: Optional[float]
+    existing_success_reasoning: Optional[str]
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,8 +69,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--db-path",
         type=Path,
-        default=Path("exports") / "app_store_apps.db",
-        help="Path to the SQLite database created in Stage 1.",
+        default=DEFAULT_DB_PATH,
+        help="Path to the Stage 1/Stage 1b SQLite database (default: exports/app_store_apps_v2.db).",
     )
     parser.add_argument(
         "--model",
@@ -102,6 +105,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Limit the number of apps to process (useful for smoke tests).",
     )
+    parser.add_argument(
+        "--run-id",
+        type=int,
+        action="append",
+        help="Only process snapshots from specific scrape run IDs (can be repeated).",
+    )
     args = parser.parse_args()
 
     if not os.getenv("OPENAI_API_KEY"):
@@ -111,18 +120,21 @@ def parse_args() -> argparse.Namespace:
 
 
 def ensure_columns(connection: sqlite3.Connection) -> None:
-    """Add the Stage 2 columns if they are missing."""
+    """Add Stage 2 columns to app_snapshots if missing."""
     existing_columns = {
-        row[1] for row in connection.execute("PRAGMA table_info(apps)")
+        row[1] for row in connection.execute("PRAGMA table_info(app_snapshots)")
     }
     required_columns = {
         "build_time_estimate": "REAL",
         "success_score": "REAL",
+        "success_reasoning": "TEXT",
     }
     for column, column_type in required_columns.items():
         if column not in existing_columns:
-            logging.info("Adding missing column '%s' to apps table", column)
-            connection.execute(f"ALTER TABLE apps ADD COLUMN {column} {column_type}")
+            logging.info("Adding missing column '%s' to app_snapshots table", column)
+            connection.execute(
+                f"ALTER TABLE app_snapshots ADD COLUMN {column} {column_type}"
+            )
     connection.commit()
 
 
@@ -131,41 +143,49 @@ def fetch_apps(
     *,
     include_existing: bool,
     limit: Optional[int],
+    run_ids: Optional[Sequence[int]],
 ) -> List[AppRecord]:
-    where_clause = ""
-    params: Tuple[Any, ...] = ()
+    filters: List[str] = []
+    params: List[Any] = []
     if not include_existing:
-        where_clause = "WHERE build_time_estimate IS NULL OR success_score IS NULL"
-    limit_clause = ""
-    if limit is not None:
-        limit_clause = "LIMIT ?"
-        params = params + (limit,)
+        filters.append(
+            "(build_time_estimate IS NULL OR success_score IS NULL OR success_reasoning IS NULL)"
+        )
+    if run_ids:
+        placeholders = ",".join("?" for _ in run_ids)
+        filters.append(f"run_id IN ({placeholders})")
+        params.extend(run_ids)
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+    limit_clause = f"LIMIT {limit}" if limit is not None else ""
 
     query = f"""
         SELECT
+            run_id,
             track_id,
             name,
-            category,
-            review_score,
-            number_of_ratings,
-            number_of_downloads,
+            primary_genre_name AS category,
+            average_user_rating AS review_score,
+            user_rating_count AS number_of_ratings,
+            user_rating_count AS number_of_downloads,
             price,
             currency,
-            developer,
+            seller_name AS developer,
             description,
             language_codes,
             chart_memberships,
             build_time_estimate,
-            success_score
-        FROM apps
+            success_score,
+            success_reasoning
+        FROM app_snapshots
         {where_clause}
-        ORDER BY track_id
+        ORDER BY run_id DESC, track_id
         {limit_clause}
     """
     connection.row_factory = sqlite3.Row
     rows = connection.execute(query, params).fetchall()
     apps = [
         AppRecord(
+            run_id=row["run_id"],
             track_id=row["track_id"],
             name=row["name"],
             category=row["category"],
@@ -180,6 +200,7 @@ def fetch_apps(
             chart_memberships=row["chart_memberships"],
             existing_build_time=row["build_time_estimate"],
             existing_success_score=row["success_score"],
+            existing_success_reasoning=row["success_reasoning"],
         )
         for row in rows
     ]
@@ -315,8 +336,16 @@ def process_apps(
     updated = 0
     skipped = 0
     for idx, app in enumerate(apps, start=1):
-        if app.existing_build_time is not None and app.existing_success_score is not None:
-            logging.debug("Skipping track_id %s (already scored)", app.track_id)
+        if (
+            app.existing_build_time is not None
+            and app.existing_success_score is not None
+            and app.existing_success_reasoning is not None
+        ):
+            logging.debug(
+                "Skipping run_id=%s track_id=%s (already scored)",
+                app.run_id,
+                app.track_id,
+            )
             skipped += 1
             continue
         payload = build_prompt_payload(app)
@@ -368,7 +397,8 @@ def process_apps(
         success_score = max(0.0, min(100.0, success_score))
 
         logging.debug(
-            "Scored track_id %s: build_time=%.2f weeks, success_score=%.2f. Reasoning: %s",
+            "Scored run_id=%s track_id=%s: build_time=%.2f weeks, success_score=%.2f. Reasoning: %s",
+            app.run_id,
             app.track_id,
             build_time,
             success_score,
@@ -377,11 +407,11 @@ def process_apps(
 
         connection.execute(
             """
-            UPDATE apps
-            SET build_time_estimate = ?, success_score = ?
-            WHERE track_id = ?
+            UPDATE app_snapshots
+            SET build_time_estimate = ?, success_score = ?, success_reasoning = ?
+            WHERE run_id = ? AND track_id = ?
             """,
-            (build_time, success_score, app.track_id),
+            (build_time, success_score, reasoning or "", app.run_id, app.track_id),
         )
         connection.commit()
         updated += 1
@@ -412,13 +442,16 @@ def main() -> None:
         connection,
         include_existing=args.force,
         limit=args.max_apps,
+        run_ids=args.run_id,
     )
 
     if not apps:
         logging.info("No apps satisfied the selection criteria. Nothing to do.")
         return
 
-    logging.info("Loaded %d apps for processing.", len(apps))
+    if args.run_id:
+        logging.info("Restricting to run IDs: %s", ", ".join(map(str, args.run_id)))
+    logging.info("Loaded %d app snapshots for processing.", len(apps))
     updated, skipped = process_apps(
         connection,
         apps,

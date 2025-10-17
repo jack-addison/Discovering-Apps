@@ -1,6 +1,6 @@
 .venv/
 __pycache__/
-exports/*.db
+# exports/*.db
 exports/*.sqlite
 exports/*.csv
 visualizations/*.png

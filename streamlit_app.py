@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from functools import lru_cache
 from pathlib import Path
@@ -12,8 +13,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from typing import Optional
 
-DB_PATH = Path("exports") / "app_store_apps.db"
+DB_PATH = Path("exports") / "app_store_apps_v2.db"
 
 AXIS_OPTIONS = {
     "build_time_estimate": "Estimated build time (weeks)",
@@ -33,31 +35,72 @@ def load_data(db_path: Path) -> pd.DataFrame:
     with sqlite3.connect(db_path) as conn:
         query = """
             SELECT
-                track_id,
-                name,
-                category,
-                build_time_estimate,
-                success_score,
-                number_of_ratings,
-                review_score,
-                number_of_downloads,
-                price,
-                developer,
-                chart_memberships,
-                scraped_at
-            FROM apps
-            WHERE build_time_estimate IS NOT NULL
-              AND success_score IS NOT NULL
+                s.run_id,
+                COALESCE(sr.created_at, s.scraped_at) AS run_created_at,
+                s.track_id,
+                s.name,
+                s.primary_genre_name AS category,
+                s.build_time_estimate,
+                s.success_score,
+                s.success_reasoning,
+                s.user_rating_count AS number_of_ratings,
+                s.average_user_rating AS review_score,
+                s.user_rating_count AS number_of_downloads,
+                s.price,
+                s.currency,
+                s.seller_name AS developer,
+                s.description,
+                s.language_codes,
+                s.chart_memberships,
+                s.scraped_at,
+                s.is_free,
+                s.has_in_app_purchases
+            FROM app_snapshots s
+            LEFT JOIN scrape_runs sr ON sr.id = s.run_id
+            WHERE s.build_time_estimate IS NOT NULL
+              AND s.success_score IS NOT NULL
         """
         df = pd.read_sql_query(query, conn)
+    if df.empty:
+        raise ValueError("No rows with Stage 2 scores found in the database.")
+
     df["price"] = df["price"].fillna(0.0)
+    df["run_created_at"] = pd.to_datetime(
+        df["run_created_at"].fillna(df["scraped_at"]), errors="coerce"
+    )
+    df["run_date"] = df["run_created_at"].dt.date
+    df["run_created_at_str"] = df["run_created_at"].dt.strftime("%Y-%m-%d %H:%M")
     df["price_tier"] = np.where(df["price"] > 0, "Paid", "Free")
     df["category_clean"] = df["category"].fillna("Unknown")
+    df["language_codes"] = df["language_codes"].apply(
+        lambda codes: ", ".join(json.loads(codes)) if isinstance(codes, str) else None
+    )
+    df["chart_memberships"] = df["chart_memberships"].apply(
+        lambda memberships: json.loads(memberships) if isinstance(memberships, str) else []
+    )
     df["category_segment"] = df["category_clean"] + " (" + df["price_tier"] + ")"
     df["success_per_week"] = df["success_score"] / df["build_time_estimate"].replace(0, np.nan)
     df["confidence_proxy"] = np.log10(df["number_of_ratings"].fillna(0) + 1)
     df["bubble_size"] = 20 + df["confidence_proxy"] * 25
     df["quick_win"] = (df["build_time_estimate"] <= 12) & (df["success_score"] >= 70)
+    return df
+
+
+@lru_cache(maxsize=1)
+def load_feature_table() -> Optional[pd.DataFrame]:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            df = pd.read_sql_query("SELECT * FROM app_snapshot_deltas", conn)
+    except (sqlite3.Error, pd.errors.DatabaseError):
+        return None
+    if df.empty:
+        return None
+    if "run_created_at" in df.columns:
+        df["run_created_at"] = pd.to_datetime(df["run_created_at"], errors="coerce")
+    if "is_new_track" in df.columns:
+        df["is_new_track"] = df["is_new_track"].astype(bool)
+    if "price_changed" in df.columns:
+        df["price_changed"] = df["price_changed"].astype(bool)
     return df
 
 
@@ -77,6 +120,21 @@ def render_sidebar(df: pd.DataFrame) -> dict:
         options=price_tiers,
         default=price_tiers,
     )
+
+    run_dates = sorted(df["run_date"].dropna().unique(), reverse=True)
+    show_all_dates = st.sidebar.checkbox("Show all scrape dates", value=not run_dates)
+    if not show_all_dates and run_dates:
+        default_date = run_dates[0]
+        selected_date = st.sidebar.date_input(
+            "Scrape date", value=default_date, min_value=min(run_dates), max_value=max(run_dates)
+        )
+        if isinstance(selected_date, list):
+            selected_dates = selected_date
+        else:
+            selected_dates = [selected_date]
+        selected_runs = df[df["run_date"].isin(selected_dates)]["run_id"].unique().tolist()
+    else:
+        selected_runs = df["run_id"].unique().tolist()
 
     min_ratings = int(df["number_of_ratings"].fillna(0).min())
     max_ratings = int(df["number_of_ratings"].fillna(0).max())
@@ -109,6 +167,7 @@ def render_sidebar(df: pd.DataFrame) -> dict:
     return {
         "categories": selected_categories,
         "price_tiers": selected_tiers,
+        "run_ids": selected_runs,
         "ratings_range": ratings_range,
         "build_range": build_range,
         "success_range": success_range,
@@ -117,9 +176,14 @@ def render_sidebar(df: pd.DataFrame) -> dict:
 
 
 def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
-    filtered = df[
-        df["category_segment"].isin(filters["categories"])
-        & df["price_tier"].isin(filters["price_tiers"])
+    if filters["run_ids"]:
+        filtered = df[df["run_id"].isin(filters["run_ids"])]
+    else:
+        filtered = df.copy()
+
+    filtered = filtered[
+        filtered["category_segment"].isin(filters["categories"])
+        & filtered["price_tier"].isin(filters["price_tiers"])
     ]
     low_ratings, high_ratings = filters["ratings_range"]
     filtered = filtered[
@@ -300,6 +364,18 @@ def render_metrics(df: pd.DataFrame) -> None:
     with col3:
         st.metric("Median success score", f"{df['success_score'].median():.1f}")
 
+    run_labels = (
+        df[["run_id", "run_created_at_str"]]
+        .drop_duplicates()
+        .sort_values(by="run_created_at_str", ascending=False)
+        .apply(
+            lambda row: f"{int(row.run_id)} ({row.run_created_at_str or 'unknown'})",
+            axis=1,
+        )
+        .tolist()
+    )
+    if run_labels:
+        st.caption("Runs shown: " + ", ".join(run_labels))
     st.caption(
         "Bubble size scales with log10(rating count + 1). Apply filters on the left to focus the chart."
     )
@@ -321,7 +397,9 @@ def render_top_table(df: pd.DataFrame) -> None:
                 "review_score",
                 "number_of_ratings",
                 "price_tier",
+                "price",
                 "developer",
+                "success_reasoning",
             ],
         ]
     )
@@ -337,11 +415,14 @@ def render_top_table(df: pd.DataFrame) -> None:
                     "success_per_week": "Score per week",
                     "review_score": "Avg review",
                     "number_of_ratings": "Ratings",
+                    "price": "Price",
+                    "success_reasoning": "Reasoning",
                 }
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
+    st.caption("Shows the filtered quick-win apps along with Stage 2 scores, derivatives, and reasoning snippets.")
 
 
 def main() -> None:
@@ -373,13 +454,24 @@ def main() -> None:
 
     render_metrics(filtered_df)
 
-    tab_scatter, tab_scatter_3d, tab_summary, tab_distribution, tab_table = st.tabs([
+    feature_df = load_feature_table()
+    tab_labels = [
         "Scatter plot",
         "3D scatter",
         "Category summary",
         "Success distribution",
         "Quick-win table",
-    ])
+    ]
+    if feature_df is not None:
+        tab_labels.append("Deltas")
+
+    tabs = st.tabs(tab_labels)
+    tab_scatter = tabs[0]
+    tab_scatter_3d = tabs[1]
+    tab_summary = tabs[2]
+    tab_distribution = tabs[3]
+    tab_table = tabs[4]
+    tab_deltas = tabs[5] if feature_df is not None else None
 
     with tab_scatter:
         controls_col, chart_col = st.columns([1, 3])
@@ -425,10 +517,19 @@ def main() -> None:
                 color_field=color_field,
                 size_field=size_field,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, config={"displayModeBar": False})
         st.caption(
             "Use the legend and lasso/box select tools to inspect specific cohorts."
         )
+        st.markdown(
+            """
+            **Tips**
+            - Toggle legend entries to isolate categories.
+            - Hover points for developer details, pricing, and ratings volume.
+            - Quick wins are shaded in green (≤12 weeks build, ≥70 success).
+            """
+        )
+        st.caption("This scatter compares effort vs. success for the filtered set; use the controls to explore variations.")
 
     with tab_scatter_3d:
         st.caption(
@@ -456,28 +557,209 @@ def main() -> None:
             index=0,
         )
         fig3d = plot_scatter_3d(filtered_df, z_metric, color_field)
-        st.plotly_chart(fig3d, use_container_width=True)
+        st.plotly_chart(fig3d, config={"displayModeBar": False})
+        st.caption("The 3D view emphasizes multivariate trends; drag to rotate, use the legend to isolate segments.")
 
     with tab_summary:
         summary_fig = plot_category_summary(filtered_df)
-        st.plotly_chart(summary_fig, use_container_width=True)
+        st.plotly_chart(summary_fig, config={"displayModeBar": False})
         st.caption("Contrast overall app coverage with quick-win volume for each category tier.")
+        st.caption("Use this grouped view to see which categories (and price tiers) dominate the current filters.")
 
     with tab_distribution:
         dist_fig = plot_success_distribution(filtered_df)
-        st.plotly_chart(dist_fig, use_container_width=True)
+        st.plotly_chart(dist_fig, config={"displayModeBar": False})
         st.caption("Box plot shows distribution of success scores split by free vs paid tiers.")
+        st.caption("Helps compare traction spread between free and paid offerings under the current filters.")
 
     with tab_table:
         render_top_table(filtered_df)
-        st.markdown(
-            """
-            **Tips**
-            - Toggle legend entries on other tabs to isolate categories.
-            - Hover points for developer details, pricing, and ratings volume.
-            - Quick wins are shaded in green (≤12 weeks build, ≥70 success).
-            """
-        )
+
+    if tab_deltas is not None and feature_df is not None:
+        with tab_deltas:
+            st.subheader("Snapshot deltas (experimental)")
+            st.caption("Comparing successive runs per app. Data sourced from analysis/build_deltas.py.")
+            st.caption("Track how success and rank metrics shift between runs. Use the metric toggle to focus on score or leaderboard movement.")
+
+            delta_view = feature_df.copy()
+            if filters["run_ids"]:
+                delta_view = delta_view[delta_view["run_id"].isin(filters["run_ids"])]
+
+            if delta_view.empty:
+                st.info("No delta data available for the current run filters.")
+            else:
+                metric_choice = st.radio(
+                    "Metric",
+                    options=["Success score", "Rank position"],
+                    index=0,
+                    horizontal=True,
+                )
+
+                metric_config = {
+                    "Success score": {
+                        "col": "delta_success",
+                        "label": "Δ success",
+                        "mean_format": lambda v: f"{v:+.2f}" if v is not None else "--",
+                        "run_title": "Average Δ success by run",
+                        "run_ylabel": "Avg Δ success",
+                        "category_title": "Top categories by avg Δ success",
+                        "improve_title": "Top positive movers (Δ success)",
+                        "decline_title": "Top negative movers (Δ success)",
+                        "improve_sort": lambda df: df.nlargest(10, "delta_success"),
+                        "decline_sort": lambda df: df.nsmallest(10, "delta_success"),
+                        "note": "Positive values indicate rising success score.",
+                    },
+                    "Rank position": {
+                        "col": "delta_rank",
+                        "label": "Δ rank (negative improves)",
+                        "mean_format": lambda v: f"{v:+.2f}" if v is not None else "--",
+                        "run_title": "Average Δ rank by run",
+                        "run_ylabel": "Avg Δ rank (negative improves)",
+                        "category_title": "Top categories by avg Δ rank",
+                        "improve_title": "Top rank improvements",
+                        "decline_title": "Top rank declines",
+                        "improve_sort": lambda df: df.nsmallest(10, "delta_rank"),
+                        "decline_sort": lambda df: df.nlargest(10, "delta_rank"),
+                        "note": "Negative values mean the app moved up the leaderboard.",
+                    },
+                }
+
+                config = metric_config[metric_choice]
+                delta_col = config["col"]
+
+                comparables = delta_view[~delta_view["is_new_track"]]
+
+                col_a, col_b, col_c, col_d = st.columns(4)
+                delta_series = comparables[delta_col].dropna()
+                avg_delta = delta_series.mean() if not delta_series.empty else None
+                col_a.metric(
+                    config["label"],
+                    config["mean_format"](avg_delta),
+                    help=config["note"],
+                )
+                col_b.metric(
+                    "Avg Δ build time",
+                    f"{comparables['delta_build_time'].dropna().mean():+.2f}" if not comparables["delta_build_time"].dropna().empty else "--",
+                )
+                col_c.metric(
+                    "New apps",
+                    int(delta_view["is_new_track"].sum()),
+                )
+                col_d.metric(
+                    "Median days between runs",
+                    f"{comparables['days_since_prev'].dropna().median():.1f}" if not comparables["days_since_prev"].dropna().empty else "--",
+                )
+
+                run_summary = (
+                    comparables.dropna(subset=["prev_run_id"])  # ensure prior exists
+                    .groupby(["run_id", "run_created_at"], as_index=False)
+                    .agg(
+                        avg_delta_metric=(delta_col, "mean"),
+                        avg_delta_build=("delta_build_time", "mean"),
+                        returning_apps=("track_id", "count"),
+                    )
+                )
+                run_new = (
+                    delta_view.groupby(["run_id", "run_created_at"], as_index=False)
+                    .agg(new_apps=("is_new_track", "sum"))
+                )
+
+                col_line, col_bar = st.columns(2)
+                if not run_summary.empty:
+                    fig_delta = px.line(
+                        run_summary,
+                        x="run_created_at",
+                        y="avg_delta_metric",
+                        markers=True,
+                        title=config["run_title"],
+                    )
+                    fig_delta.update_layout(xaxis_title="Run", yaxis_title=config["run_ylabel"])
+                    col_line.plotly_chart(fig_delta, config={"displayModeBar": False})
+                else:
+                    col_line.info("Not enough data to compute average deltas yet.")
+
+                if not run_new.empty:
+                    fig_new = px.bar(
+                        run_new,
+                        x="run_created_at",
+                        y="new_apps",
+                        title="New apps per run",
+                    )
+                    fig_new.update_layout(xaxis_title="Run", yaxis_title="# New apps")
+                    col_bar.plotly_chart(fig_new, config={"displayModeBar": False})
+                else:
+                    col_bar.info("No run data to display new app counts.")
+
+                top_gain = config["improve_sort"](comparables.dropna(subset=[delta_col]))
+                top_loss = config["decline_sort"](comparables.dropna(subset=[delta_col]))
+
+                movers_cols = ["run_id", "track_id", "name", "run_created_at"]
+                if metric_choice == "Rank position":
+                    movers_cols.extend(["best_rank", "prev_rank", "delta_rank"])
+                else:
+                    movers_cols.extend(["success_score", "prev_success_score", "delta_success"])
+                movers_cols.append("days_since_prev")
+
+                col_gain, col_loss = st.columns(2)
+                col_gain.markdown(f"**{config['improve_title']}**")
+                col_gain.dataframe(top_gain[movers_cols] if not top_gain.empty else pd.DataFrame(columns=movers_cols), width="stretch", hide_index=True)
+                col_loss.markdown(f"**{config['decline_title']}**")
+                col_loss.dataframe(top_loss[movers_cols] if not top_loss.empty else pd.DataFrame(columns=movers_cols), width="stretch", hide_index=True)
+
+                cat_summary = (
+                    comparables.dropna(subset=[delta_col])
+                    .groupby("category", as_index=False)
+                    .agg(avg_delta_metric=(delta_col, "mean"), apps=("track_id", "count"))
+                    .sort_values("avg_delta_metric", ascending=True if metric_choice == "Rank position" else False)
+                    .head(10)
+                )
+                if not cat_summary.empty:
+                    fig_cat = px.bar(
+                        cat_summary,
+                        x="category",
+                        y="avg_delta_metric",
+                        text="apps",
+                        title=config["category_title"],
+                    )
+                    fig_cat.update_layout(xaxis_title="Category", yaxis_title=config["run_ylabel"])
+                    st.plotly_chart(fig_cat, config={"displayModeBar": False})
+
+                st.markdown("**Raw delta table**")
+                show_columns = [
+                    "run_id",
+                    "track_id",
+                    "name",
+                    "run_created_at",
+                    "success_score",
+                    "prev_success_score",
+                    "delta_success",
+                    "build_time_estimate",
+                    "prev_build_time",
+                    "delta_build_time",
+                    "average_user_rating",
+                    "prev_rating",
+                    "delta_rating",
+                    "user_rating_count",
+                    "prev_rating_count",
+                    "delta_rating_count",
+                    "days_since_prev",
+                    "price",
+                    "prev_price",
+                    "price_changed",
+                    "best_rank",
+                    "prev_rank",
+                    "delta_rank",
+                    "is_new_track",
+                ]
+                available_columns = [col for col in show_columns if col in delta_view.columns]
+                st.dataframe(
+                    delta_view[available_columns]
+                    .sort_values(["track_id", "run_id"], ascending=[True, False]),
+                    width="stretch",
+                    hide_index=True,
+                )
+    elif tab_deltas is None:
+        st.info("Delta table not available. Run analysis/build_deltas.py to populate app_snapshot_deltas.")
 
 
 if __name__ == "__main__":

@@ -24,7 +24,8 @@ pip install -r requirements.txt
 - OpenAI API key (only required for Stage 2 scoring)
 
 ### Repository layout
-- `app_store_scraper.py` – Stage 1 scraper pulling App Store metadata.
+- `app_store_scraper.py` – Stage 1 scraper pulling App Store metadata (latest snapshot only).
+- `app_store_scraper_v2.py` – Enhanced scraper that records historical snapshots and richer metadata.
 - `app_stage2_analysis.py` – Stage 2 LLM scoring script that enriches the database.
 - `visualize_scores.py` – Static PNG scatter plot generator.
 - `visualize_scores_interactive.py` – Plotly HTML preview with quick-win filters.
@@ -51,6 +52,20 @@ Harvest the top 100 apps for every category (default limit is 100):
 python app_store_scraper.py --collection top-free --all-categories
 ```
 
+### Snapshot-aware scraper (Stage 1b)
+Use the v2 script when you want to keep historical runs and additional metadata (release dates, version info, price tier, screenshots, etc.). Each invocation writes to `exports/app_store_apps_v2.db` by default and records a new entry in `scrape_runs`, `app_snapshots`, and `app_rankings`.
+
+```bash
+python app_store_scraper_v2.py \
+  --collection top-free \
+  --all-categories \
+  --country us \
+  --limit 100 \
+  --note "top-free all categories"
+```
+
+Switch to `--search-term` for keyword scrapes, or provide `--output-db` to store snapshots in a different location without touching the original Stage 1 database.
+
 The SQLite database lives at `exports/app_store_apps.db`. Inspect it with the built-in shell:
 
 ```bash
@@ -65,11 +80,11 @@ When you sweep every category, the `chart_memberships` column stores a JSON arra
 
 ## Stage 2: LLM Scoring
 
-Use the Stage 2 script to enrich each app with estimated build time and success potential:
+Use the Stage 2 script to enrich the snapshot database with estimated build time and success potential:
 
 ```bash
 export OPENAI_API_KEY=sk-...
-python app_stage2_analysis.py
+python app_stage2_analysis.py --run-id 5 --run-id 6
 ```
 
 ### Getting an OpenAI API key
@@ -102,7 +117,8 @@ python app_stage2_analysis.py
 - For reusable workflows, place the export in your shell profile or use a local `.env` file with a loader (e.g., `python -m dotenv run -- app_stage2_analysis.py`), but keep that file out of version control.
 
 Key notes:
-- The script adds `build_time_estimate` and `success_score` columns if they are missing, then iterates apps (skipping already scored rows unless you pass `--force`).
+- Targets `exports/app_store_apps_v2.db` by default (override with `--db-path`). Use one or more `--run-id` arguments to limit which scrape snapshots are scored.
+- The script adds `build_time_estimate`, `success_score`, and `success_reasoning` columns if they are missing, then iterates apps (skipping already scored rows unless you pass `--force`).
 - It prompts an OpenAI model (default `gpt-4.1-mini`) with app metadata, asking for an MVP build-time estimate and a 0–100 success score. Adjust the model with `--model`.
 - Progress logs appear every 20 apps; you can limit runs with `--max-apps` for dry runs.
 - Handle rate limits automatically with retry/back-off (configure via `--max-retries` and `--retry-wait`).
@@ -113,11 +129,15 @@ Key notes:
 - **Reasoning string**: Each response includes a short justification for GPT’s numbers. We store only the numeric fields in SQLite, but the reasoning is logged for debugging.
 - **Quick-win definition**: Throughout the tooling, “quick wins” refers to `build_time_estimate ≤ 12` and `success_score ≥ 70`. This threshold powers the shading in the plots and the leaderboard filters.
 
+- **Batch experiment**: `python experiments/batch_stage2_experiment.py` tests grouping apps (default 20 at a time, first 40 snapshots) and writes the raw model responses to `experiments/batch_stage2_results.json` for comparison without touching the database.
+- **Cheaper-model experiment**: `python experiments/cheaper_model_experiment.py` re-scores the first 40 snapshots with a cheaper model (default `gpt-3.5-turbo`) and stores results in `experiments/cheaper_model_results.json` for side-by-side comparison.
+- **Feature extraction**: `python analysis/build_deltas.py` materialises per-app snapshot deltas (e.g., success/rating/rank changes) into the `app_snapshot_deltas` table inside `exports/app_store_apps_v2.db`.
+
 ## Stage 3: Visualising Outcomes
 
 - Static preview: `python visualize_scores.py` renders `visualizations/success_vs_build_time.png`.
 - Interactive dashboard: `python visualize_scores_interactive.py --open` writes an HTML scatter plot to `visualizations/success_vs_build_time.html` and opens it in your browser. Categories are split into free/paid variants, and you can use flags such as `--min-ratings 500`, `--max-build-time 16`, `--min-success 70`, or `--quick-wins-only` to focus on specific cohorts.
-- Streamlit app: `streamlit run streamlit_app.py` launches an interactive workspace with filter controls (category, price tier, rating volume, build time, success score, quick wins toggle), configurable 2D/3D scatter plots (choose axes, colour, bubble size), category summary bars, distribution box plots, and a quick-win leaderboard.
+- Streamlit app: `streamlit run streamlit_app.py` launches an interactive workspace with filter controls (category, price tier, scrape run selection, rating volume, build time, success score, quick wins toggle), configurable 2D/3D scatter plots (choose axes, colour, bubble size), category summary bars, distribution box plots, and a quick-win leaderboard.
 - Hosted demo: visit [discovering-apps-jack.streamlit.app](https://discovering-apps-jack.streamlit.app) to explore the dashboard without running it locally.
 - Hover a point to inspect the app’s scores, ratings volume, review average, and price. Toggle categories via the legend to declutter the view. The shaded quadrant highlights quick wins (high success score, low build effort).
 
