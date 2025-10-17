@@ -2,18 +2,20 @@ name: Refresh Snapshots
 
 on:
   schedule:
-    - cron: "0 6 * * *"      # every day at 06:00 UTC
-  workflow_dispatch: {}      # allow manual runs from the Actions tab
+    - cron: "0 6 * * *"        # run daily at 06:00 UTC
+  workflow_dispatch: {}        # allow manual runs from the Actions tab
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write          # needed to push changes with GITHUB_TOKEN
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0        # keeps history so commits can be made cleanly
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,8 +27,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Stage 1: scrape free and paid charts
-      - name: Scrape top free
+      # Stage 1 (snapshot-aware scraper)
+      - name: Scrape top free (all categories)
         run: |
           python app_store_scraper_v2.py \
             --collection top-free \
@@ -34,7 +36,7 @@ jobs:
             --limit 100 \
             --note "GitHub Action top-free"
 
-      - name: Scrape top paid
+      - name: Scrape top paid (all categories)
         run: |
           python app_store_scraper_v2.py \
             --collection top-paid \
@@ -42,39 +44,46 @@ jobs:
             --limit 100 \
             --note "GitHub Action top-paid"
 
-      # Stage 1.5: reuse previous scores
+      # Stage 1.5 reuse
       - name: Reuse existing Stage 2 scores
         run: python scripts/reuse_stage2_scores.py --log-level INFO
 
-      # Stage 2: score remaining apps
+      # Stage 2 scoring (only remaining NULL rows)
       - name: Stage 2 scoring
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python app_stage2_analysis.py
 
-      # Materialize deltas into DB
-      - name: Build snapshot deltas
+      # Build deltas table inside the DB
+      - name: Materialise snapshot deltas
         run: python analysis/build_deltas.py
 
-      # Option 1: Commit the updated DB back to the repo
-      - name: Commit database
+      # Commit database (optional skip if using artifacts/LFS)
+      - name: Commit updated database
         env:
-          GIT_COMMIT_USER: ${{ secrets.GIT_COMMIT_USER || 'github-actions[bot]' }}
-          GIT_COMMIT_EMAIL: ${{ secrets.GIT_COMMIT_EMAIL || 'github-actions[bot]@users.noreply.github.com' }}
+          COMMIT_USER: ${{ secrets.GIT_COMMIT_USER || 'github-actions[bot]' }}
+          COMMIT_EMAIL: ${{ secrets.GIT_COMMIT_EMAIL || 'github-actions[bot]@users.noreply.github.com' }}
         run: |
-          git config user.name "$GIT_COMMIT_USER"
-          git config user.email "$GIT_COMMIT_EMAIL"
+          git config user.name "$COMMIT_USER"
+          git config user.email "$COMMIT_EMAIL"
           git add exports/app_store_apps_v2.db
+          git add .gitignore README.md streamlit_app.py app_stage2_analysis.py \
+                  analysis/build_deltas.py scripts/reuse_stage2_scores.py \
+                  app_store_scraper_v2.py experiments/batch_stage2_experiment.py \
+                  experiments/cheaper_model_experiment.py
           git commit -m "Automated snapshot refresh" || echo "Nothing to commit"
 
-      - name: Push
-        uses: ad-m/github-push-action@v0.8.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin HEAD:main
 
-      # Option 2 (instead of committing): Upload DB as an artifact
-      # - name: Upload updated DB
+      # If you prefer not to commit the DB, comment out the commit/push block
+      # above and instead upload it as an artifact:
+      # - name: Upload snapshot DB
       #   uses: actions/upload-artifact@v4
       #   with:
       #     name: app_store_apps_v2.db
       #     path: exports/app_store_apps_v2.db
+      #     retention-days: 7
