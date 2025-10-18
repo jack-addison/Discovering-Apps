@@ -29,7 +29,7 @@ pip install -r requirements.txt
 - `app_stage2_analysis.py` – Stage 2 LLM scoring script that enriches the database.
 - `visualize_scores.py` – Static PNG scatter plot generator.
 - `visualize_scores_interactive.py` – Plotly HTML preview with quick-win filters.
-- `streamlit_app.py` – Streamlit dashboard for interactive exploration.
+- `streamlit_app.py` – Streamlit dashboard for interactive exploration (scatter views, quick-win leaderboard, revamped opportunity finder).
 - `exports/app_store_apps.db` – Sample SQLite database populated via the scraper.
 - `requirements.txt` – Python dependencies.
 - `visualizations/` – Generated charts (PNG/HTML).
@@ -137,7 +137,7 @@ Key notes:
 
 - Static preview: `python visualize_scores.py` renders `visualizations/success_vs_build_time.png`.
 - Interactive dashboard: `python visualize_scores_interactive.py --open` writes an HTML scatter plot to `visualizations/success_vs_build_time.html` and opens it in your browser. Categories are split into free/paid variants, and you can use flags such as `--min-ratings 500`, `--max-build-time 16`, `--min-success 70`, or `--quick-wins-only` to focus on specific cohorts.
-- Streamlit app: `streamlit run streamlit_app.py` launches an interactive workspace with filter controls (category, price tier, scrape run selection, rating volume, build time, success score, quick wins toggle), configurable 2D/3D scatter plots (choose axes, colour, bubble size), category summary bars, distribution box plots, a quick-win leaderboard, and an opportunity finder tab for spotting high-price, low-rating apps that look easy to build. The sidebar can be widened by tweaking the injected CSS in `streamlit_app.py`.
+- Streamlit app: `streamlit run streamlit_app.py` launches an interactive workspace with filter controls (category, price tier, scrape run selection, rating volume, build time, success score, quick wins toggle), configurable 2D/3D scatter plots (choose axes, colour, bubble size), category summary bars, distribution box plots, a quick-win leaderboard, and a revamped Opportunity Finder. The tab now exposes demand dissatisfaction (raw and percentile scores), execution floor controls (success score or success-per-week), cohort metric cards, concise result tables with expandable snapshots, and per-category standouts. The sidebar can be widened by tweaking the injected CSS in `streamlit_app.py`.
 - Hosted demo: visit [discovering-apps-jack.streamlit.app](https://discovering-apps-jack.streamlit.app) to explore the dashboard without running it locally.
 - Hover a point to inspect the app’s scores, ratings volume, review average, and price. Toggle categories via the legend to declutter the view. The shaded quadrant highlights quick wins (high success score, low build effort).
 
