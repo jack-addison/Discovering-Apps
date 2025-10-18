@@ -218,21 +218,24 @@ def fetch_embeddings(
     """
     connection.row_factory = sqlite3.Row
     rows = connection.execute(query, params).fetchall()
-    embeddings: List[EmbeddingRow] = []
+
+    latest_by_track: Dict[int, EmbeddingRow] = {}
     for row in rows:
         vector = np.array(json.loads(row["embedding_json"]), dtype=np.float32)
         norm = np.linalg.norm(vector)
         if norm == 0:
             continue
-        embeddings.append(
-            EmbeddingRow(
-                run_id=row["run_id"],
-                track_id=row["track_id"],
-                description=row["description"] or "",
-                vector=vector / norm,
-            )
+        record = EmbeddingRow(
+            run_id=row["run_id"],
+            track_id=row["track_id"],
+            description=row["description"] or "",
+            vector=vector / norm,
         )
-    return embeddings
+        existing = latest_by_track.get(record.track_id)
+        if existing is None or record.run_id > existing.run_id:
+            latest_by_track[record.track_id] = record
+
+    return list(latest_by_track.values())
 
 
 def kmeans(
