@@ -72,7 +72,12 @@ jobs:
                   app_store_scraper_v2.py experiments/batch_stage2_experiment.py \
                   experiments/cheaper_model_experiment.py
           git commit -m "Automated snapshot refresh" || echo "Nothing to commit"
-
+          
+      - name: Sync with remote
+        run: |
+          git fetch origin
+          git pull --rebase origin main
+      
       - name: Push changes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
