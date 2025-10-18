@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,11 +32,21 @@ def get_connection():
     return sqlitecloud.connect(CONNECTION_URI)
 
 
-@lru_cache(maxsize=1)
-def load_data() -> pd.DataFrame:
+def fetch_dataframe(query: str, params: Tuple[Any, ...] | List[Any] | None = None) -> pd.DataFrame:
     conn = get_connection()
     try:
-        query = """
+        cursor = conn.cursor()
+        cursor.execute(query, params or [])
+        rows = cursor.fetchall()
+        columns = [col[0] for col in cursor.description] if cursor.description else []
+        return pd.DataFrame(rows, columns=columns)
+    finally:
+        conn.close()
+
+
+@lru_cache(maxsize=1)
+def load_data() -> pd.DataFrame:
+    query = """
             SELECT
                 s.run_id,
                 COALESCE(sr.created_at, s.scraped_at) AS run_created_at,
@@ -63,9 +73,7 @@ def load_data() -> pd.DataFrame:
             WHERE s.build_time_estimate IS NOT NULL
               AND s.success_score IS NOT NULL
         """
-        df = pd.read_sql_query(query, conn)
-    finally:
-        conn.close()
+    df = fetch_dataframe(query)
     if df.empty:
         raise ValueError("No rows with Stage 2 scores found in the database.")
 
@@ -100,9 +108,7 @@ def load_data() -> pd.DataFrame:
 @lru_cache(maxsize=1)
 def load_neighbors(model: str = DEFAULT_EMBEDDING_MODEL) -> Dict[Tuple[int, int], List[dict]]:
     try:
-        conn = get_connection()
-        try:
-            query = """
+        query = """
                 SELECT
                     n.run_id,
                     n.track_id,
@@ -126,9 +132,7 @@ def load_neighbors(model: str = DEFAULT_EMBEDDING_MODEL) -> Dict[Tuple[int, int]
                 WHERE n.model = ?
                 ORDER BY n.run_id DESC, n.track_id, n.rank
             """
-            df = pd.read_sql_query(query, conn, params=(model,))
-        finally:
-            conn.close()
+        df = fetch_dataframe(query, params=(model,))
     except (Exception, pd.errors.DatabaseError):
         return {}
     if df.empty:
@@ -166,20 +170,17 @@ def load_neighbors(model: str = DEFAULT_EMBEDDING_MODEL) -> Dict[Tuple[int, int]
 @lru_cache(maxsize=1)
 def load_cluster_data(model: str = DEFAULT_EMBEDDING_MODEL) -> Tuple[pd.DataFrame, pd.DataFrame]:
     try:
-        conn = get_connection()
-        try:
-            clusters_df = pd.read_sql_query(
-                """
+        clusters_df = fetch_dataframe(
+            """
                 SELECT id, scope, model, label, keywords_json, size, avg_success, avg_build, avg_demand, created_at
                 FROM app_snapshot_clusters
                 WHERE model = ?
                 ORDER BY size DESC
                 """,
-                conn,
-                params=(model,),
-            )
-            members_df = pd.read_sql_query(
-                """
+            params=(model,),
+        )
+        members_df = fetch_dataframe(
+            """
                 SELECT
                     m.cluster_id,
                     m.run_id,
@@ -202,11 +203,8 @@ def load_cluster_data(model: str = DEFAULT_EMBEDDING_MODEL) -> Tuple[pd.DataFram
                  AND s.track_id = m.track_id
                 WHERE c.model = ?
                 """,
-                conn,
-                params=(model,),
-            )
-        finally:
-            conn.close()
+            params=(model,),
+        )
     except (Exception, pd.errors.DatabaseError):
         return pd.DataFrame(), pd.DataFrame()
 
@@ -236,11 +234,7 @@ def load_cluster_data(model: str = DEFAULT_EMBEDDING_MODEL) -> Tuple[pd.DataFram
 @lru_cache(maxsize=1)
 def load_feature_table() -> Optional[pd.DataFrame]:
     try:
-        conn = get_connection()
-        try:
-            df = pd.read_sql_query("SELECT * FROM app_snapshot_deltas", conn)
-        finally:
-            conn.close()
+        df = fetch_dataframe("SELECT * FROM app_snapshot_deltas")
     except (Exception, pd.errors.DatabaseError):
         return None
     if df.empty:
