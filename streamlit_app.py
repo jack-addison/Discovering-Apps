@@ -597,7 +597,7 @@ def render_similarity_clusters(
             "keywords": "Keywords",
         }
     )
-    top_clusters["Inspect"] = False
+    top_clusters.insert(0, "Inspect", False)
 
     edited_clusters = st.data_editor(
         top_clusters.head(200),
