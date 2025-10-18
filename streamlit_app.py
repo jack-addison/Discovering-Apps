@@ -586,27 +586,37 @@ def render_similarity_clusters(
         "avg_build_display",
         "avg_demand_display",
         "keywords",
-    ]].head(20)
-    st.dataframe(
-        top_clusters.rename(
-            columns={
-                "label_display": "Cluster",
-                "size": "Apps",
-                "avg_success_display": "Avg success",
-                "avg_build_display": "Avg build weeks",
-                "avg_demand_display": "Avg demand",
-                "keywords": "Keywords",
-            }
-        ),
+    ]].copy()
+    top_clusters = top_clusters.rename(
+        columns={
+            "label_display": "Cluster",
+            "size": "Apps",
+            "avg_success_display": "Avg success",
+            "avg_build_display": "Avg build weeks",
+            "avg_demand_display": "Avg demand",
+            "keywords": "Keywords",
+        }
+    )
+    top_clusters["Inspect"] = False
+
+    edited_clusters = st.data_editor(
+        top_clusters.head(200),
         hide_index=True,
         use_container_width=True,
+        column_config={
+            "Inspect": st.column_config.CheckboxColumn(
+                help="Check a cluster to preview its members below.",
+                default=False,
+            ),
+        },
+        key="cluster_overview_editor",
     )
 
-    selected_cluster_id = st.selectbox(
-        "Inspect cluster",
-        options=clusters_df["id"],
-        format_func=lambda cid: clusters_df.loc[clusters_df["id"] == cid, "label_display"].iloc[0],
-    )
+    selected_ids = edited_clusters.loc[edited_clusters["Inspect"], "id"].tolist()
+    if selected_ids:
+        selected_cluster_id = selected_ids[0]
+    else:
+        selected_cluster_id = clusters_df.iloc[0]["id"]
     cluster_row = clusters_df.loc[clusters_df["id"] == selected_cluster_id].iloc[0]
     keywords = ", ".join(cluster_row.get("keywords", [])) or "Unlabelled"
 
