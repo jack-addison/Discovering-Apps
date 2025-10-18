@@ -107,7 +107,7 @@ def load_feature_table() -> Optional[pd.DataFrame]:
 def render_sidebar(df: pd.DataFrame) -> dict:
     st.sidebar.header("Filters")
 
-    categories = sorted(df["category_segment"].dropna().unique())
+    categories = sorted(df["category_clean"].dropna().unique())
     selected_categories = st.sidebar.multiselect(
         "Categories",
         options=categories,
@@ -182,7 +182,7 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         filtered = df.copy()
 
     filtered = filtered[
-        filtered["category_segment"].isin(filters["categories"])
+        filtered["category_clean"].isin(filters["categories"])
         & filtered["price_tier"].isin(filters["price_tiers"])
     ]
     low_ratings, high_ratings = filters["ratings_range"]
@@ -425,11 +425,149 @@ def render_top_table(df: pd.DataFrame) -> None:
     st.caption("Shows the filtered quick-win apps along with Stage 2 scores, derivatives, and reasoning snippets.")
 
 
+def render_opportunity_finder(df: pd.DataFrame) -> None:
+    st.subheader("High-price, low-rating opportunities")
+    if df.empty:
+        st.info("No data available under the current filters.")
+        return
+
+    working = df[
+        df["price"].notna()
+        & df["number_of_ratings"].notna()
+        & df["review_score"].notna()
+        & df["build_time_estimate"].notna()
+    ].copy()
+
+    if working.empty:
+        st.info("No rows contain complete price, rating count, rating score, and build-time data.")
+        return
+
+    st.caption("Thresholds are computed from the currently filtered dataset.")
+    col_price, col_ratings, col_score, col_effort = st.columns(4)
+    with col_price:
+        price_pct = st.slider(
+            "Price ≥ percentile",
+            min_value=50,
+            max_value=100,
+            value=75,
+            help="Select apps priced in the top percentile range.",
+        )
+    with col_ratings:
+        ratings_pct = st.slider(
+            "Rating count ≥ percentile",
+            min_value=50,
+            max_value=100,
+            value=75,
+            help="Select apps with rating counts in the top percentile range.",
+        )
+    with col_score:
+        rating_cap = st.slider(
+            "Average rating ≤",
+            min_value=1.0,
+            max_value=5.0,
+            value=3.5,
+            step=0.1,
+            help="Upper bound for average review score.",
+        )
+    with col_effort:
+        effort_cap = st.slider(
+            "Build weeks ≤",
+            min_value=1.0,
+            max_value=40.0,
+            value=12.0,
+            step=0.5,
+            help="Upper bound for Stage 2 build-time estimate.",
+        )
+
+    price_cutoff = working["price"].quantile(price_pct / 100) if not working["price"].empty else None
+    ratings_cutoff = working["number_of_ratings"].quantile(ratings_pct / 100) if not working["number_of_ratings"].empty else None
+
+    if price_cutoff is None or ratings_cutoff is None:
+        st.warning("Unable to compute percentile cutoffs. Adjust filters or thresholds.")
+        return
+
+    filtered_opps = working[
+        (working["price"] >= price_cutoff)
+        & (working["number_of_ratings"] >= ratings_cutoff)
+        & (working["review_score"] <= rating_cap)
+        & (working["build_time_estimate"] <= effort_cap)
+    ].copy()
+
+    st.caption(
+        f"Price ≥ {price_cutoff:.2f}, rating count ≥ {int(ratings_cutoff)}, rating ≤ {rating_cap:.2f}, build weeks ≤ {effort_cap:.1f}."
+    )
+
+    if filtered_opps.empty:
+        st.info("No apps match the current criteria. Adjust the sliders to broaden the search.")
+        return
+
+    sort_option = st.selectbox(
+        "Sort results by",
+        options=[
+            "Highest price",
+            "Highest rating count",
+            "Lowest rating score",
+            "Lowest build weeks",
+        ],
+    )
+    if sort_option == "Highest price":
+        filtered_opps.sort_values("price", ascending=False, inplace=True)
+    elif sort_option == "Highest rating count":
+        filtered_opps.sort_values("number_of_ratings", ascending=False, inplace=True)
+    elif sort_option == "Lowest rating score":
+        filtered_opps.sort_values("review_score", ascending=True, inplace=True)
+    else:
+        filtered_opps.sort_values("build_time_estimate", ascending=True, inplace=True)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Matches", len(filtered_opps))
+    col2.metric("Average price", f"{filtered_opps['price'].mean():.2f}")
+    col3.metric("Average rating", f"{filtered_opps['review_score'].mean():.2f}")
+
+    display_columns = [
+        "name",
+        "category_segment",
+        "price",
+        "number_of_ratings",
+        "review_score",
+        "build_time_estimate",
+        "success_score",
+        "success_reasoning",
+    ]
+    st.dataframe(
+        filtered_opps[display_columns].rename(
+            columns={
+                "name": "App",
+                "category_segment": "Category",
+                "price": "Price",
+                "number_of_ratings": "Rating count",
+                "review_score": "Avg rating",
+                "build_time_estimate": "Build weeks",
+                "success_score": "Stage 2 success",
+                "success_reasoning": "Reasoning",
+            }
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.caption("Apps meeting the configured high-price, high-volume, low-rating, and low-effort criteria.")
+
+
 def main() -> None:
     st.set_page_config(
         page_title="App Store Opportunity Explorer",
         page_icon="📱",
         layout="wide",
+    )
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stSidebar"] {
+            width: 26rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
     st.title("App Store Opportunity Explorer")
     st.caption(
@@ -461,6 +599,7 @@ def main() -> None:
         "Category summary",
         "Success distribution",
         "Quick-win table",
+        "Opportunity finder",
     ]
     if feature_df is not None:
         tab_labels.append("Deltas")
@@ -471,7 +610,8 @@ def main() -> None:
     tab_summary = tabs[2]
     tab_distribution = tabs[3]
     tab_table = tabs[4]
-    tab_deltas = tabs[5] if feature_df is not None else None
+    tab_opportunities = tabs[5]
+    tab_deltas = tabs[6] if feature_df is not None else None
 
     with tab_scatter:
         controls_col, chart_col = st.columns([1, 3])
@@ -521,6 +661,7 @@ def main() -> None:
         st.caption(
             "Use the legend and lasso/box select tools to inspect specific cohorts."
         )
+        st.caption("This scatter compares effort vs. success for the filtered apps; adjust controls to explore variations.")
         st.markdown(
             """
             **Tips**
@@ -558,12 +699,14 @@ def main() -> None:
         )
         fig3d = plot_scatter_3d(filtered_df, z_metric, color_field)
         st.plotly_chart(fig3d, config={"displayModeBar": False})
+        st.caption("Use the 3D view to inspect relationships across three metrics; drag to rotate and highlight segments via the legend.")
         st.caption("The 3D view emphasizes multivariate trends; drag to rotate, use the legend to isolate segments.")
 
     with tab_summary:
         summary_fig = plot_category_summary(filtered_df)
         st.plotly_chart(summary_fig, config={"displayModeBar": False})
         st.caption("Contrast overall app coverage with quick-win volume for each category tier.")
+        st.caption("Grouped bars highlight which categories and price tiers dominate within the current filters.")
         st.caption("Use this grouped view to see which categories (and price tiers) dominate the current filters.")
 
     with tab_distribution:
@@ -571,9 +714,13 @@ def main() -> None:
         st.plotly_chart(dist_fig, config={"displayModeBar": False})
         st.caption("Box plot shows distribution of success scores split by free vs paid tiers.")
         st.caption("Helps compare traction spread between free and paid offerings under the current filters.")
+        st.caption("Helps compare traction spread between free and paid offerings under the current filters.")
 
     with tab_table:
         render_top_table(filtered_df)
+
+    with tab_opportunities:
+        render_opportunity_finder(filtered_df)
 
     if tab_deltas is not None and feature_df is not None:
         with tab_deltas:
