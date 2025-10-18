@@ -30,6 +30,7 @@ pip install -r requirements.txt
 - `visualize_scores.py` – Static PNG scatter plot generator.
 - `visualize_scores_interactive.py` – Plotly HTML preview with quick-win filters.
 - `streamlit_app.py` – Streamlit dashboard for interactive exploration (scatter views, quick-win leaderboard, revamped opportunity finder).
+- `analysis/generate_embeddings.py` – Creates text embeddings for app snapshots to power similarity analysis.
 - `exports/app_store_apps.db` – Sample SQLite database populated via the scraper.
 - `requirements.txt` – Python dependencies.
 - `visualizations/` – Generated charts (PNG/HTML).
@@ -140,6 +141,21 @@ Key notes:
 - Streamlit app: `streamlit run streamlit_app.py` launches an interactive workspace with filter controls (category, price tier, scrape run selection, rating volume, build time, success score, quick wins toggle), configurable 2D/3D scatter plots (choose axes, colour, bubble size), category summary bars, distribution box plots, a quick-win leaderboard, and a revamped Opportunity Finder. The tab now exposes demand dissatisfaction (raw and percentile scores), execution floor controls (success score or success-per-week), cohort metric cards, concise result tables with expandable snapshots, and per-category standouts. The sidebar can be widened by tweaking the injected CSS in `streamlit_app.py`.
 - Hosted demo: visit [discovering-apps-jack.streamlit.app](https://discovering-apps-jack.streamlit.app) to explore the dashboard without running it locally.
 - Hover a point to inspect the app’s scores, ratings volume, review average, and price. Toggle categories via the legend to declutter the view. The shaded quadrant highlights quick wins (high success score, low build effort).
+
+## Similarity embeddings (experimental)
+
+Generate text embeddings for snapshot descriptions to group comparable apps or build “similar apps” features:
+
+```bash
+export OPENAI_API_KEY=sk-...
+python analysis/generate_embeddings.py --batch-size 50 --run-id 12
+```
+
+Key details:
+- Defaults to the `text-embedding-3-small` model (cheaper, high recall). Override with `--model`.
+- Stores vectors in `app_snapshot_embeddings` keyed by `(run_id, track_id, model)` with a description hash to avoid re-embedding unchanged rows.
+- Supports `--run-id`, `--max-apps`, and `--force` flags; runs in batches with automatic retry handling.
+- Combine the resulting vectors with cosine similarity or your preferred ANN index to surface competitive cohorts in the dashboard.
 
 ## Next steps
 - Schedule recurring Stage 1 scrapes (cron, CI) so your dataset stays fresh.
