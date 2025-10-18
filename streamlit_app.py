@@ -7,15 +7,16 @@ import json
 import sqlite3
 from functools import lru_cache
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from typing import Optional
 
 DB_PATH = Path("exports") / "app_store_apps_v2.db"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 
 AXIS_OPTIONS = {
     "build_time_estimate": "Estimated build time (weeks)",
@@ -90,6 +91,69 @@ def load_data(db_path: Path) -> pd.DataFrame:
     else:
         df["demand_dissatisfaction_percentile"] = 0.0
     return df
+
+
+@lru_cache(maxsize=1)
+def load_neighbors(model: str = DEFAULT_EMBEDDING_MODEL) -> Dict[Tuple[int, int], List[dict]]:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            query = """
+                SELECT
+                    n.run_id,
+                    n.track_id,
+                    n.neighbor_run_id,
+                    n.neighbor_track_id,
+                    n.similarity,
+                    n.rank,
+                    s.name AS neighbor_name,
+                    s.primary_genre_name AS neighbor_category,
+                    s.price AS neighbor_price,
+                    s.currency AS neighbor_currency,
+                    s.is_free AS neighbor_is_free,
+                    s.success_score AS neighbor_success_score,
+                    s.build_time_estimate AS neighbor_build_time,
+                    s.user_rating_count AS neighbor_rating_count,
+                    s.average_user_rating AS neighbor_review_score
+                FROM app_snapshot_neighbors n
+                JOIN app_snapshots s
+                  ON s.run_id = n.neighbor_run_id
+                 AND s.track_id = n.neighbor_track_id
+                WHERE n.model = ?
+                ORDER BY n.run_id DESC, n.track_id, n.rank
+            """
+            df = pd.read_sql_query(query, conn, params=(model,))
+    except (sqlite3.Error, pd.errors.DatabaseError):
+        return {}
+    if df.empty:
+        return {}
+
+    df["neighbor_price_label"] = np.where(
+        df["neighbor_is_free"].fillna(0).astype(bool) | df["neighbor_price"].fillna(0).eq(0),
+        "Free",
+        df["neighbor_price"].fillna(0).map(lambda p: f"${p:.2f}"),
+    )
+    df["neighbor_similarity_pct"] = (df["similarity"] * 100).round(1)
+
+    neighbor_map: Dict[Tuple[int, int], List[dict]] = {}
+    for (run_id, track_id), group in df.groupby(["run_id", "track_id"]):
+        neighbor_map[(run_id, track_id)] = [
+            {
+                "neighbor_run_id": row["neighbor_run_id"],
+                "neighbor_track_id": row["neighbor_track_id"],
+                "name": row["neighbor_name"],
+                "category": row["neighbor_category"],
+                "price_label": row["neighbor_price_label"],
+                "similarity": float(row["similarity"]),
+                "similarity_pct": float(row["neighbor_similarity_pct"]),
+                "rank": int(row["rank"]),
+                "success_score": row["neighbor_success_score"],
+                "build_time_estimate": row["neighbor_build_time"],
+                "rating_count": row["neighbor_rating_count"],
+                "review_score": row["neighbor_review_score"],
+            }
+            for _, row in group.iterrows()
+        ]
+    return neighbor_map
 
 
 @lru_cache(maxsize=1)
@@ -431,7 +495,7 @@ def render_top_table(df: pd.DataFrame) -> None:
     st.caption("Shows the filtered quick-win apps along with Stage 2 scores, derivatives, and reasoning snippets.")
 
 
-def render_opportunity_finder(df: pd.DataFrame) -> None:
+def render_opportunity_finder(df: pd.DataFrame, neighbor_lookup: Dict[Tuple[int, int], List[dict]]) -> None:
     st.subheader("High-price, low-rating opportunities")
     st.info(
         "Work top to bottom: refine the cohort with the threshold controls, enforce an execution floor, then review the ranked tables to prioritise which incumbents to clone."
@@ -585,6 +649,21 @@ def render_opportunity_finder(df: pd.DataFrame) -> None:
         else:
             filtered_opps.sort_values("build_time_estimate", ascending=True, inplace=True)
 
+        neighbor_lists = [
+            neighbor_lookup.get((row["run_id"], row["track_id"]), [])
+            for _, row in filtered_opps.iterrows()
+        ]
+        filtered_opps = filtered_opps.assign(neighbors=neighbor_lists)
+
+        def format_similar(entries: List[dict], limit: int = 3) -> str:
+            if not entries:
+                return "—"
+            snippets = [
+                f"{item['name']} ({item['similarity']:.2f})"
+                for item in entries[:limit]
+            ]
+            return ", ".join(snippets)
+
         filtered_opps = filtered_opps.assign(
             opportunity_note=filtered_opps.apply(
                 lambda row: (
@@ -594,7 +673,8 @@ def render_opportunity_finder(df: pd.DataFrame) -> None:
                     f"demand dissatisfaction {row['demand_dissatisfaction']:.0f} ({row['demand_dissatisfaction_percentile']:.0f}th %tile)."
                 ),
                 axis=1,
-            )
+            ),
+            similar_apps=filtered_opps["neighbors"].apply(format_similar),
         )
 
         col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -624,6 +704,7 @@ def render_opportunity_finder(df: pd.DataFrame) -> None:
             "success_score",
             "demand_dissatisfaction",
             "demand_dissatisfaction_percentile",
+            "similar_apps",
             "success_reasoning",
         ]
         if risk_metric == "success_per_week":
@@ -640,6 +721,7 @@ def render_opportunity_finder(df: pd.DataFrame) -> None:
                 "success_reasoning": "Reasoning",
                 "demand_dissatisfaction": "Demand dissatisfaction",
                 "demand_dissatisfaction_percentile": "Demand %tile",
+                "similar_apps": "Similar apps",
                 "success_per_week": "Success per week",
             }
         )
@@ -656,6 +738,13 @@ def render_opportunity_finder(df: pd.DataFrame) -> None:
         with st.expander("Opportunity snapshots", expanded=False):
             for _, row in filtered_opps.iterrows():
                 st.markdown(f"**{row['name']}** — {row['opportunity_note']}")
+                neighbors = row.get("neighbors") or []
+                if neighbors:
+                    neighbor_summary = ", ".join(
+                        f"{entry['name']} ({entry['similarity']:.2f})"
+                        for entry in neighbors[:5]
+                    )
+                    st.caption(f"Similar: {neighbor_summary}")
         st.caption(
             "Apps meeting the configured high-price, high-volume, low-rating, low-effort criteria with large dissatisfied audiences. Sort to inspect the derivative angle that matters most."
         )
@@ -779,6 +868,7 @@ def main() -> None:
     render_metrics(filtered_df)
 
     feature_df = load_feature_table()
+    neighbor_lookup = load_neighbors()
     tab_labels = [
         "Scatter plot",
         "3D scatter",
@@ -906,7 +996,7 @@ def main() -> None:
         render_top_table(filtered_df)
 
     with tab_opportunities:
-        render_opportunity_finder(filtered_df)
+        render_opportunity_finder(filtered_df, neighbor_lookup)
 
     if tab_deltas is not None and feature_df is not None:
         with tab_deltas:
