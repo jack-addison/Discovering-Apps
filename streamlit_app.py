@@ -157,6 +157,73 @@ def load_neighbors(model: str = DEFAULT_EMBEDDING_MODEL) -> Dict[Tuple[int, int]
 
 
 @lru_cache(maxsize=1)
+def load_cluster_data(model: str = DEFAULT_EMBEDDING_MODEL) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            clusters_df = pd.read_sql_query(
+                """
+                SELECT id, scope, model, label, keywords_json, size, avg_success, avg_build, avg_demand, created_at
+                FROM app_snapshot_clusters
+                WHERE model = ?
+                ORDER BY size DESC
+                """,
+                conn,
+                params=(model,),
+            )
+            members_df = pd.read_sql_query(
+                """
+                SELECT
+                    m.cluster_id,
+                    m.run_id,
+                    m.track_id,
+                    m.distance,
+                    s.name,
+                    s.primary_genre_name AS category,
+                    s.price,
+                    s.currency,
+                    s.is_free,
+                    s.success_score,
+                    s.build_time_estimate,
+                    s.user_rating_count,
+                    s.average_user_rating
+                FROM app_snapshot_cluster_members AS m
+                JOIN app_snapshot_clusters AS c
+                  ON c.id = m.cluster_id
+                JOIN app_snapshots AS s
+                  ON s.run_id = m.run_id
+                 AND s.track_id = m.track_id
+                WHERE c.model = ?
+                """,
+                conn,
+                params=(model,),
+            )
+    except (sqlite3.Error, pd.errors.DatabaseError):
+        return pd.DataFrame(), pd.DataFrame()
+
+    if not clusters_df.empty:
+        clusters_df["keywords"] = clusters_df["keywords_json"].apply(lambda val: json.loads(val) if isinstance(val, str) else [])
+        clusters_df["label_display"] = clusters_df.apply(
+            lambda row: f"{row['label']} ({row['size']})" if row.get("label") else f"Cluster {row['id']} ({row['size']})",
+            axis=1,
+        )
+        clusters_df["avg_success_display"] = clusters_df["avg_success"].map(lambda x: f"{x:.1f}" if pd.notna(x) else "–")
+        clusters_df["avg_build_display"] = clusters_df["avg_build"].map(lambda x: f"{x:.1f}" if pd.notna(x) else "–")
+        clusters_df["avg_demand_display"] = clusters_df["avg_demand"].map(lambda x: f"{x:.0f}" if pd.notna(x) else "–")
+
+    if not members_df.empty:
+        members_df["price_label"] = np.where(
+            members_df["is_free"].fillna(0).astype(bool) | members_df["price"].fillna(0).eq(0),
+            "Free",
+            members_df["price"].fillna(0).map(lambda p: f"${p:.2f}"),
+        )
+        members_df["distance"] = members_df["distance"].astype(float)
+        members_df["similarity"] = 1 - members_df["distance"].clip(lower=0)
+        members_df["similarity_pct"] = (members_df["similarity"] * 100).round(1)
+
+    return clusters_df, members_df
+
+
+@lru_cache(maxsize=1)
 def load_feature_table() -> Optional[pd.DataFrame]:
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -493,6 +560,117 @@ def render_top_table(df: pd.DataFrame) -> None:
             hide_index=True,
         )
     st.caption("Shows the filtered quick-win apps along with Stage 2 scores, derivatives, and reasoning snippets.")
+
+
+def render_similarity_clusters(
+    filtered_df: pd.DataFrame,
+    clusters_df: pd.DataFrame,
+    members_df: pd.DataFrame,
+) -> None:
+    st.subheader("Similarity clusters")
+    st.caption(
+        "Clusters are generated from text embeddings (top keywords shown). Use them to explore competitive pods and compare apps with similar positioning."
+    )
+
+    if clusters_df.empty or members_df.empty:
+        st.info(
+            "No cluster data available. Run `python analysis/build_clusters.py` after generating embeddings to populate this view."
+        )
+        return
+
+    top_clusters = clusters_df[[
+        "id",
+        "label_display",
+        "size",
+        "avg_success_display",
+        "avg_build_display",
+        "avg_demand_display",
+        "keywords",
+    ]].head(20)
+    st.dataframe(
+        top_clusters.rename(
+            columns={
+                "label_display": "Cluster",
+                "size": "Apps",
+                "avg_success_display": "Avg success",
+                "avg_build_display": "Avg build weeks",
+                "avg_demand_display": "Avg demand",
+                "keywords": "Keywords",
+            }
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    selected_cluster_id = st.selectbox(
+        "Inspect cluster",
+        options=clusters_df["id"],
+        format_func=lambda cid: clusters_df.loc[clusters_df["id"] == cid, "label_display"].iloc[0],
+    )
+    cluster_row = clusters_df.loc[clusters_df["id"] == selected_cluster_id].iloc[0]
+    keywords = ", ".join(cluster_row.get("keywords", [])) or "Unlabelled"
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Apps", int(cluster_row["size"]))
+    metric_cols[1].metric("Avg success", cluster_row.get("avg_success_display", "–"))
+    metric_cols[2].metric("Avg build weeks", cluster_row.get("avg_build_display", "–"))
+    metric_cols[3].metric("Avg demand", cluster_row.get("avg_demand_display", "–"))
+
+    st.markdown(f"**Keywords:** {keywords}")
+    st.caption(
+        "Similarity measured via embedding cosine distance. Demand = rating volume × rating gap."
+    )
+
+    cluster_members = members_df[members_df["cluster_id"] == selected_cluster_id].copy()
+    cluster_members.sort_values("similarity", ascending=False, inplace=True)
+    filtered_keys = set(zip(filtered_df["run_id"], filtered_df["track_id"]))
+    cluster_members["in_filters"] = cluster_members.apply(
+        lambda row: (row["run_id"], row["track_id"]) in filtered_keys,
+        axis=1,
+    )
+
+    st.markdown("#### Cluster members")
+    member_display = cluster_members[[
+        "name",
+        "category",
+        "price_label",
+        "success_score",
+        "build_time_estimate",
+        "user_rating_count",
+        "average_user_rating",
+        "similarity_pct",
+        "in_filters",
+    ]].rename(
+        columns={
+            "name": "App",
+            "category": "Category",
+            "price_label": "Price",
+            "success_score": "Success",
+            "build_time_estimate": "Build weeks",
+            "user_rating_count": "Rating count",
+            "average_user_rating": "Avg rating",
+            "similarity_pct": "Similarity %",
+            "in_filters": "Matches current filters",
+        }
+    )
+    st.dataframe(
+        member_display,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Similarity %": st.column_config.NumberColumn(format="%.1f"),
+            "Success": st.column_config.NumberColumn(format="%.0f"),
+            "Build weeks": st.column_config.NumberColumn(format="%.1f"),
+            "Avg rating": st.column_config.NumberColumn(format="%.2f"),
+        },
+    )
+
+    if cluster_members["in_filters"].any():
+        st.caption(
+            "Rows highlighted with `Matches current filters` = True align with the sidebar filters."
+        )
+    else:
+        st.caption("Adjust sidebar filters to intersect with this cluster.")
 
 
 def render_opportunity_finder(df: pd.DataFrame, neighbor_lookup: Dict[Tuple[int, int], List[dict]]) -> None:
@@ -875,6 +1053,7 @@ def main() -> None:
         "Category summary",
         "Success distribution",
         "Quick-win table",
+        "Similarity clusters",
         "Opportunity finder",
     ]
     if feature_df is not None:
@@ -886,8 +1065,9 @@ def main() -> None:
     tab_summary = tabs[2]
     tab_distribution = tabs[3]
     tab_table = tabs[4]
-    tab_opportunities = tabs[5]
-    tab_deltas = tabs[6] if feature_df is not None else None
+    tab_clusters = tabs[5]
+    tab_opportunities = tabs[6]
+    tab_deltas = tabs[7] if feature_df is not None else None
 
     with tab_scatter:
         controls_col, chart_col = st.columns([1, 3])
@@ -994,6 +1174,10 @@ def main() -> None:
 
     with tab_table:
         render_top_table(filtered_df)
+
+    clusters_df, members_df = load_cluster_data()
+    with tab_clusters:
+        render_similarity_clusters(filtered_df, clusters_df, members_df)
 
     with tab_opportunities:
         render_opportunity_finder(filtered_df, neighbor_lookup)
