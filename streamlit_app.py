@@ -83,6 +83,12 @@ def load_data(db_path: Path) -> pd.DataFrame:
     df["confidence_proxy"] = np.log10(df["number_of_ratings"].fillna(0) + 1)
     df["bubble_size"] = 20 + df["confidence_proxy"] * 25
     df["quick_win"] = (df["build_time_estimate"] <= 12) & (df["success_score"] >= 70)
+    df["demand_dissatisfaction"] = df["number_of_ratings"].fillna(0) * (5.0 - df["review_score"].fillna(5.0))
+    diss_values = df["demand_dissatisfaction"].replace([np.inf, -np.inf], np.nan)
+    if diss_values.notna().any():
+        df["demand_dissatisfaction_percentile"] = diss_values.rank(pct=True) * 100
+    else:
+        df["demand_dissatisfaction_percentile"] = 0.0
     return df
 
 
@@ -427,6 +433,9 @@ def render_top_table(df: pd.DataFrame) -> None:
 
 def render_opportunity_finder(df: pd.DataFrame) -> None:
     st.subheader("High-price, low-rating opportunities")
+    st.info(
+        "Work top to bottom: refine the cohort with the threshold controls, enforce an execution floor, then review the ranked tables to prioritise which incumbents to clone."
+    )
     if df.empty:
         st.info("No data available under the current filters.")
         return
@@ -442,47 +451,98 @@ def render_opportunity_finder(df: pd.DataFrame) -> None:
         st.info("No rows contain complete price, rating count, rating score, and build-time data.")
         return
 
-    st.caption("Thresholds are computed from the currently filtered dataset.")
-    col_price, col_ratings, col_score, col_effort = st.columns(4)
-    with col_price:
-        price_pct = st.slider(
-            "Price ≥ percentile",
+    with st.expander("Audience & sentiment thresholds", expanded=True):
+        st.caption(
+            "Focus on premium incumbents with traction but unhappy users and a manageable build scope."
+        )
+        col_price, col_ratings, col_score, col_effort = st.columns(4)
+        with col_price:
+            price_pct = st.slider(
+                "Price ≥ percentile",
+                min_value=50,
+                max_value=100,
+                value=75,
+                help="Select apps priced in the top percentile range.",
+            )
+        with col_ratings:
+            ratings_pct = st.slider(
+                "Rating count ≥ percentile",
+                min_value=50,
+                max_value=100,
+                value=75,
+                help="Select apps with rating counts in the top percentile range.",
+            )
+        with col_score:
+            rating_cap = st.slider(
+                "Average rating ≤",
+                min_value=1.0,
+                max_value=5.0,
+                value=3.5,
+                step=0.1,
+                help="Upper bound for average review score.",
+            )
+        with col_effort:
+            effort_cap = st.slider(
+                "Build weeks ≤",
+                min_value=1.0,
+                max_value=40.0,
+                value=12.0,
+                step=0.5,
+                help="Upper bound for Stage 2 build-time estimate.",
+            )
+        dissatisfaction_pct = st.slider(
+            "Demand dissatisfaction ≥ percentile",
             min_value=50,
             max_value=100,
             value=75,
-            help="Select apps priced in the top percentile range.",
+            help="Targets apps with a large, dissatisfied audience (rating count × rating gap).",
         )
-    with col_ratings:
-        ratings_pct = st.slider(
-            "Rating count ≥ percentile",
-            min_value=50,
-            max_value=100,
-            value=75,
-            help="Select apps with rating counts in the top percentile range.",
+        st.caption(
+            "Demand dissatisfaction multiplies rating volume by the rating gap (5 − average rating). The percentile column shows how extreme the signal is within the loaded dataset."
         )
-    with col_score:
-        rating_cap = st.slider(
-            "Average rating ≤",
-            min_value=1.0,
-            max_value=5.0,
-            value=3.5,
-            step=0.1,
-            help="Upper bound for average review score.",
+
+    with st.expander("Execution floor", expanded=False):
+        risk_metric = st.selectbox(
+            "Execution risk metric",
+            options=["success_score", "success_per_week"],
+            format_func=lambda key: "Stage 2 success score" if key == "success_score" else "Success per week",
+            help="Apply a minimum bar for commercial upside: either the raw Stage 2 score or success divided by build time.",
         )
-    with col_effort:
-        effort_cap = st.slider(
-            "Build weeks ≤",
-            min_value=1.0,
-            max_value=40.0,
-            value=12.0,
-            step=0.5,
-            help="Upper bound for Stage 2 build-time estimate.",
+        risk_series = (
+            working[risk_metric]
+            .replace([np.inf, -np.inf], np.nan)
+            .dropna()
         )
+        if risk_series.empty:
+            st.warning("Unable to evaluate execution risk for the current dataset.")
+            return
+
+        risk_min = float(risk_series.min())
+        risk_max = float(risk_series.max())
+        if abs(risk_min - risk_max) < 1e-6:
+            st.info(f"Execution risk metric is uniform at {risk_min:.1f}; using that value as the filter.")
+            risk_threshold = risk_min
+        else:
+            default_threshold = risk_series.quantile(0.75)
+            default_threshold = float(min(risk_max, max(risk_min, default_threshold)))
+            risk_threshold = st.slider(
+                "Minimum execution score",
+                min_value=risk_min,
+                max_value=risk_max,
+                value=float(default_threshold),
+                step=0.1 if risk_metric == "success_score" else 0.05,
+                help="Raise this to focus on derivatives that also look likely to succeed.",
+            )
 
     price_cutoff = working["price"].quantile(price_pct / 100) if not working["price"].empty else None
     ratings_cutoff = working["number_of_ratings"].quantile(ratings_pct / 100) if not working["number_of_ratings"].empty else None
+    dissatisfaction_cutoff = (
+        working["demand_dissatisfaction"].quantile(dissatisfaction_pct / 100)
+        if not working["demand_dissatisfaction"].empty
+        else None
+    )
 
-    if price_cutoff is None or ratings_cutoff is None:
+    if price_cutoff is None or ratings_cutoff is None or dissatisfaction_cutoff is None:
         st.warning("Unable to compute percentile cutoffs. Adjust filters or thresholds.")
         return
 
@@ -491,51 +551,84 @@ def render_opportunity_finder(df: pd.DataFrame) -> None:
         & (working["number_of_ratings"] >= ratings_cutoff)
         & (working["review_score"] <= rating_cap)
         & (working["build_time_estimate"] <= effort_cap)
+        & (working[risk_metric] >= risk_threshold)
+        & (working["demand_dissatisfaction"] >= dissatisfaction_cutoff)
     ].copy()
 
     st.caption(
-        f"Price ≥ {price_cutoff:.2f}, rating count ≥ {int(ratings_cutoff)}, rating ≤ {rating_cap:.2f}, build weeks ≤ {effort_cap:.1f}."
+        f"Price ≥ {price_cutoff:.2f}, rating count ≥ {int(ratings_cutoff)}, rating ≤ {rating_cap:.2f}, build weeks ≤ {effort_cap:.1f}, "
+        f"{'success score' if risk_metric == 'success_score' else 'success per week'} ≥ {risk_threshold:.1f}, "
+        f"demand dissatisfaction ≥ {int(dissatisfaction_cutoff)}."
     )
 
     if filtered_opps.empty:
         st.info("No apps match the current criteria. Adjust the sliders to broaden the search.")
-        return
-
-    sort_option = st.selectbox(
-        "Sort results by",
-        options=[
-            "Highest price",
-            "Highest rating count",
-            "Lowest rating score",
-            "Lowest build weeks",
-        ],
-    )
-    if sort_option == "Highest price":
-        filtered_opps.sort_values("price", ascending=False, inplace=True)
-    elif sort_option == "Highest rating count":
-        filtered_opps.sort_values("number_of_ratings", ascending=False, inplace=True)
-    elif sort_option == "Lowest rating score":
-        filtered_opps.sort_values("review_score", ascending=True, inplace=True)
     else:
-        filtered_opps.sort_values("build_time_estimate", ascending=True, inplace=True)
+        sort_option = st.selectbox(
+            "Sort results by",
+            options=[
+                "Highest price",
+                "Highest rating count",
+                "Lowest rating score",
+                "Lowest build weeks",
+                "Highest demand dissatisfaction",
+            ],
+        )
+        if sort_option == "Highest price":
+            filtered_opps.sort_values("price", ascending=False, inplace=True)
+        elif sort_option == "Highest rating count":
+            filtered_opps.sort_values("number_of_ratings", ascending=False, inplace=True)
+        elif sort_option == "Lowest rating score":
+            filtered_opps.sort_values("review_score", ascending=True, inplace=True)
+        elif sort_option == "Highest demand dissatisfaction":
+            filtered_opps.sort_values("demand_dissatisfaction", ascending=False, inplace=True)
+        else:
+            filtered_opps.sort_values("build_time_estimate", ascending=True, inplace=True)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Matches", len(filtered_opps))
-    col2.metric("Average price", f"{filtered_opps['price'].mean():.2f}")
-    col3.metric("Average rating", f"{filtered_opps['review_score'].mean():.2f}")
+        filtered_opps = filtered_opps.assign(
+            opportunity_note=filtered_opps.apply(
+                lambda row: (
+                    f"${row['price']:.2f} {row['category_segment']} app with "
+                    f"{int(row['number_of_ratings']):,} ratings averaging {row['review_score']:.1f}/5; "
+                    f"{row['build_time_estimate']:.1f} build weeks, success {row['success_score']:.0f}, "
+                    f"demand dissatisfaction {row['demand_dissatisfaction']:.0f} ({row['demand_dissatisfaction_percentile']:.0f}th %tile)."
+                ),
+                axis=1,
+            )
+        )
 
-    display_columns = [
-        "name",
-        "category_segment",
-        "price",
-        "number_of_ratings",
-        "review_score",
-        "build_time_estimate",
-        "success_score",
-        "success_reasoning",
-    ]
-    st.dataframe(
-        filtered_opps[display_columns].rename(
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("Matches", len(filtered_opps))
+        col2.metric("Avg price", f"{filtered_opps['price'].mean():.2f}")
+        col3.metric("Avg rating", f"{filtered_opps['review_score'].mean():.2f}")
+        col4.metric(
+            "Avg demand",
+            f"{filtered_opps['demand_dissatisfaction'].mean():.0f}",
+        )
+        col5.metric(
+            "Avg execution",
+            f"{filtered_opps[risk_metric].mean():.1f}",
+        )
+        col6.metric(
+            "Avg demand %tile",
+            f"{filtered_opps['demand_dissatisfaction_percentile'].mean():.0f}",
+        )
+
+        display_columns = [
+            "name",
+            "category_segment",
+            "price",
+            "number_of_ratings",
+            "review_score",
+            "build_time_estimate",
+            "success_score",
+            "demand_dissatisfaction",
+            "demand_dissatisfaction_percentile",
+            "success_reasoning",
+        ]
+        if risk_metric == "success_per_week":
+            display_columns.append("success_per_week")
+        display_table = filtered_opps[display_columns].rename(
             columns={
                 "name": "App",
                 "category_segment": "Category",
@@ -545,12 +638,105 @@ def render_opportunity_finder(df: pd.DataFrame) -> None:
                 "build_time_estimate": "Build weeks",
                 "success_score": "Stage 2 success",
                 "success_reasoning": "Reasoning",
+                "demand_dissatisfaction": "Demand dissatisfaction",
+                "demand_dissatisfaction_percentile": "Demand %tile",
+                "success_per_week": "Success per week",
+            }
+        )
+        st.dataframe(
+            display_table,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Demand dissatisfaction": st.column_config.NumberColumn(format="%.0f"),
+                "Demand %tile": st.column_config.NumberColumn(format="%.0f"),
+                "Reasoning": st.column_config.TextColumn(help="Stage 2 reasoning behind the success estimate."),
+            },
+        )
+        with st.expander("Opportunity snapshots", expanded=False):
+            for _, row in filtered_opps.iterrows():
+                st.markdown(f"**{row['name']}** — {row['opportunity_note']}")
+        st.caption(
+            "Apps meeting the configured high-price, high-volume, low-rating, low-effort criteria with large dissatisfied audiences. Sort to inspect the derivative angle that matters most."
+        )
+
+        top_per_category_all = (
+            working.sort_values("demand_dissatisfaction", ascending=False)
+            .groupby("category_clean", as_index=False)
+            .first()
+        )
+        if not top_per_category_all.empty:
+            top_per_category_all = top_per_category_all.assign(
+                opportunity_note=top_per_category_all.apply(
+                    lambda row: (
+                        f"${row['price']:.2f} {row['category_segment']} app with "
+                        f"{int(row['number_of_ratings']):,} ratings averaging {row['review_score']:.1f}/5; "
+                        f"{row['build_time_estimate']:.1f} build weeks, success {row['success_score']:.0f}, "
+                        f"demand dissatisfaction {row['demand_dissatisfaction']:.0f} ({row['demand_dissatisfaction_percentile']:.0f}th %tile)."
+                    ),
+                    axis=1,
+                )
+            )
+            st.markdown("### Top opportunities by category")
+            st.caption("Skim for the category leaders with the most dissatisfied demand across the full dataset.")
+            top_cols = [
+                "category_clean",
+                "name",
+                "price",
+                "number_of_ratings",
+                "review_score",
+                "build_time_estimate",
+                "success_score",
+                "demand_dissatisfaction",
+                "demand_dissatisfaction_percentile",
+                "opportunity_note",
+            ]
+            if risk_metric == "success_per_week":
+                top_cols.insert(-1, "success_per_week")
+            st.dataframe(
+                top_per_category_all[top_cols].rename(
+                    columns={
+                        "category_clean": "Category",
+                        "name": "App",
+                        "price": "Price",
+                        "number_of_ratings": "Rating count",
+                        "review_score": "Avg rating",
+                        "build_time_estimate": "Build weeks",
+                        "success_score": "Stage 2 success",
+                        "demand_dissatisfaction": "Demand dissatisfaction",
+                        "demand_dissatisfaction_percentile": "Demand %tile",
+                        "success_per_week": "Success per week",
+                        "opportunity_note": "Snapshot",
+                    }
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+
+    st.markdown("---")
+    st.subheader("Competitor density overview")
+    st.caption(
+        "Use this table to understand how densely the current filters populate each niche. High counts signal crowded segments where differentiation matters; low counts hint at underserved spaces."
+    )
+    density = df.groupby(["category_clean", "price_tier"], as_index=False).agg(
+        apps=("track_id", "nunique"),
+        total_ratings=("number_of_ratings", "sum"),
+        avg_rating=("review_score", "mean"),
+    )
+    density.sort_values("apps", ascending=False, inplace=True)
+    st.dataframe(
+        density.rename(
+            columns={
+                "category_clean": "Category",
+                "price_tier": "Tier",
+                "apps": "App count",
+                "total_ratings": "Total ratings",
+                "avg_rating": "Avg rating",
             }
         ),
         width="stretch",
         hide_index=True,
     )
-    st.caption("Apps meeting the configured high-price, high-volume, low-rating, and low-effort criteria.")
 
 
 def main() -> None:
