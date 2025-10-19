@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Sequence
 
 import requests
@@ -25,10 +25,10 @@ from app_store_scraper_v2 import (  # type: ignore
     fetch_collection_ids,
     fetch_search_results,
     insert_rankings,
-    insert_snapshots,
     lookup_apps,
     normalize_snapshot,
     build_category_memberships,
+    chunked,
 )
 
 from cloud_config import CONNECTION_URI
@@ -199,7 +199,7 @@ def insert_run_cloud(
     note: Optional[str],
 ) -> int:
     ensure_cloud_schema(connection)
-    created_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     cursor = connection.cursor()
     cursor.execute(
         """
@@ -225,6 +225,48 @@ def insert_run_cloud(
     return run_id
 
 
+def insert_snapshots_cloud(connection, snapshots: Sequence[Dict[str, object]], batch_size: int = 50) -> None:
+    if not snapshots:
+        return
+    ensure_cloud_schema(connection)
+    sql = (
+        """
+        INSERT OR REPLACE INTO app_snapshots (
+            run_id, track_id, name, description,
+            release_date, current_version_release_date, version,
+            primary_genre_id, primary_genre_name, genre_ids, genres,
+            content_advisory_rating, price, formatted_price, currency,
+            is_free, has_in_app_purchases, seller_name, seller_url,
+            developer_id, bundle_id, average_user_rating,
+            average_user_rating_current, user_rating_count,
+            user_rating_count_current, rating_count_list, language_codes,
+            minimum_os_version, file_size_bytes, screenshot_urls,
+            ipad_screenshot_urls, appletv_screenshot_urls, app_store_url,
+            artwork_url, chart_memberships, scraped_at
+        ) VALUES (
+            :run_id, :track_id, :name, :description,
+            :release_date, :current_version_release_date, :version,
+            :primary_genre_id, :primary_genre_name, :genre_ids, :genres,
+            :content_advisory_rating, :price, :formatted_price, :currency,
+            :is_free, :has_in_app_purchases, :seller_name, :seller_url,
+            :developer_id, :bundle_id, :average_user_rating,
+            :average_user_rating_current, :user_rating_count,
+            :user_rating_count_current, :rating_count_list, :language_codes,
+            :minimum_os_version, :file_size_bytes, :screenshot_urls,
+            :ipad_screenshot_urls, :appletv_screenshot_urls, :app_store_url,
+            :artwork_url, :chart_memberships, :scraped_at
+        )
+        """
+    )
+    cursor = connection.cursor()
+    try:
+        for batch in chunked(snapshots, batch_size):
+            cursor.executemany(sql, batch)
+            connection.commit()
+    finally:
+        cursor.close()
+
+
 def main() -> None:
     args = parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level), format="%(levelname)s: %(message)s")
@@ -234,7 +276,7 @@ def main() -> None:
         logging.warning("No app metadata retrieved.")
         return
 
-    scraped_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    scraped_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     connection = sqlitecloud.connect(args.connection_uri)
 
     run_id = insert_run_cloud(
@@ -258,7 +300,7 @@ def main() -> None:
         snapshot = normalize_snapshot(record, run_id, memberships, scraped_at)
         snapshots.append(snapshot)
 
-    insert_snapshots(connection, snapshots)
+    insert_snapshots_cloud(connection, snapshots)
     insert_rankings(connection, run_id, ranking_rows)
     connection.close()
     logging.info("Persisted %d app snapshots (run %s) to SQLiteCloud", len(snapshots), run_id)
