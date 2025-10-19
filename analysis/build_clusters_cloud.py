@@ -6,6 +6,12 @@ from __future__ import annotations
 import argparse
 import logging
 import sqlitecloud
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from analysis.build_clusters import (  # type: ignore
     DEFAULT_MODEL,
@@ -72,4 +78,3 @@ if __name__ == "__main__":
     import numpy as np  # local import to avoid dependency for help text
 
     main()
-
