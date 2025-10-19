@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -16,6 +15,7 @@ import sqlitecloud
 
 CONNECTION_URI = "sqlitecloud://cky1wteehz.g4.sqlite.cloud:8860/app_store_apps_v2.db?apikey=HuDMLrUJedgC54VQOfbfQ489AY0aDivJ6XXfe1r01Wo"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+CACHE_TTL_SECONDS = 900
 
 AXIS_OPTIONS = {
     "build_time_estimate": "Estimated build time (weeks)",
@@ -44,7 +44,7 @@ def fetch_dataframe(query: str, params: Tuple[Any, ...] | List[Any] | None = Non
         conn.close()
 
 
-@lru_cache(maxsize=1)
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_data() -> pd.DataFrame:
     query = """
             SELECT
@@ -105,7 +105,7 @@ def load_data() -> pd.DataFrame:
     return df
 
 
-@lru_cache(maxsize=1)
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_neighbors(model: str = DEFAULT_EMBEDDING_MODEL) -> Dict[Tuple[int, int], List[dict]]:
     try:
         query = """
@@ -167,7 +167,7 @@ def load_neighbors(model: str = DEFAULT_EMBEDDING_MODEL) -> Dict[Tuple[int, int]
     return neighbor_map
 
 
-@lru_cache(maxsize=1)
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_cluster_data(model: str = DEFAULT_EMBEDDING_MODEL) -> Tuple[pd.DataFrame, pd.DataFrame]:
     try:
         clusters_df = fetch_dataframe(
@@ -231,7 +231,7 @@ def load_cluster_data(model: str = DEFAULT_EMBEDDING_MODEL) -> Tuple[pd.DataFram
     return clusters_df, members_df
 
 
-@lru_cache(maxsize=1)
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_feature_table() -> Optional[pd.DataFrame]:
     try:
         df = fetch_dataframe("SELECT * FROM app_snapshot_deltas")
