@@ -16,6 +16,7 @@ for collection in "${collections[@]}"; do
 done
 
 echo "[Cloud Pipeline] Running Stage 2 scoring..."
+python "$SCRIPT_DIR/scripts/reuse_stage2_scores_cloud.py"
 python "$SCRIPT_DIR/app_stage2_analysis_cloud.py"
 
 echo "[Cloud Pipeline] Building snapshot deltas..."

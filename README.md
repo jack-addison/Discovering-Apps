@@ -33,6 +33,7 @@ pip install -r requirements.txt
 - `streamlit_app_cloud.py` – Streamlit dashboard variant pointing at the hosted SQLiteCloud database.
 - `app_store_scraper_v2_cloud.py` – Cloud-connected Stage 1 scraper (writes snapshots to SQLiteCloud).
 - `app_stage2_analysis_cloud.py` – Stage 2 scoring script targeting SQLiteCloud.
+- `scripts/reuse_stage2_scores_cloud.py` – Reuses Stage 2 scores in SQLiteCloud when metadata is unchanged.
 - `analysis/generate_embeddings_cloud.py` – Generates embeddings directly in SQLiteCloud.
 - `analysis/build_neighbors_cloud.py` – Computes similarity neighbours for the cloud DB.
 - `analysis/build_clusters_cloud.py` – Builds keyword-labelled clusters in SQLiteCloud.
@@ -201,6 +202,7 @@ Typical end-to-end refresh:
 The helper script executes:
 - `app_store_scraper_v2_cloud.py` – Stage 1 scrape into SQLiteCloud.
 - `app_stage2_analysis_cloud.py` – Stage 2 scoring.
+- `scripts/reuse_stage2_scores_cloud.py` – Reuse prior Stage 2 scores before re-scoring.
 - `analysis/build_deltas_cloud.py` – Snapshot deltas.
 - `analysis/generate_embeddings_cloud.py` – Embeddings.
 - `analysis/build_neighbors_cloud.py` – Similarity neighbours.

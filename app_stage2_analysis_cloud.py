@@ -4,25 +4,20 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
-import time
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Sequence
 
 import sqlitecloud
-from openai import APIError, OpenAI, RateLimitError
+from openai import OpenAI
 
 from app_stage2_analysis import (  # type: ignore
     DEFAULT_MODEL,
     DEFAULT_SLEEP_SECONDS,
-    SYSTEM_PROMPT,
-    USER_PROMPT_TEMPLATE,
     AppRecord,
     ensure_columns,
     fetch_apps,
-    process_batches,
+    process_apps,
 )
 from cloud_config import CONNECTION_URI
 
@@ -53,7 +48,6 @@ def main() -> None:
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    client = OpenAI()
     with sqlitecloud.connect(args.connection_uri) as conn:
         ensure_columns(conn)
         apps = fetch_apps(
@@ -66,17 +60,15 @@ def main() -> None:
             logging.info("No apps requiring Stage 2 scoring.")
             return
         logging.info("Scoring %d apps against %s", len(apps), args.model)
-        process_batches(
+        process_apps(
             conn,
-            client=client,
-            apps=apps,
+            apps,
             model=args.model,
             max_retries=args.max_retries,
             retry_wait=args.retry_wait,
-            progress_interval=args.batch_progress,
+            batch_progress=args.batch_progress,
         )
 
 
 if __name__ == "__main__":
     main()
-
