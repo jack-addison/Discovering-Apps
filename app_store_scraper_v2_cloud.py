@@ -25,7 +25,6 @@ from app_store_scraper_v2 import (  # type: ignore
     fetch_collection_ids,
     fetch_search_results,
     insert_rankings,
-    insert_run,
     insert_snapshots,
     lookup_apps,
     normalize_snapshot,
@@ -114,6 +113,118 @@ def collect_records(args: argparse.Namespace):
     return raw_records, membership_map, ranking_rows, source
 
 
+def ensure_cloud_schema(connection) -> None:
+    statements = [
+        """
+        CREATE TABLE IF NOT EXISTS scrape_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            source TEXT NOT NULL,
+            country TEXT,
+            collection TEXT,
+            search_term TEXT,
+            limit_requested INTEGER,
+            all_categories INTEGER,
+            note TEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS app_snapshots (
+            run_id INTEGER NOT NULL,
+            track_id INTEGER NOT NULL,
+            name TEXT,
+            description TEXT,
+            release_date TEXT,
+            current_version_release_date TEXT,
+            version TEXT,
+            primary_genre_id INTEGER,
+            primary_genre_name TEXT,
+            genre_ids TEXT,
+            genres TEXT,
+            content_advisory_rating TEXT,
+            price REAL,
+            formatted_price TEXT,
+            currency TEXT,
+            is_free INTEGER,
+            has_in_app_purchases INTEGER,
+            seller_name TEXT,
+            seller_url TEXT,
+            developer_id TEXT,
+            bundle_id TEXT,
+            average_user_rating REAL,
+            average_user_rating_current REAL,
+            user_rating_count INTEGER,
+            user_rating_count_current INTEGER,
+            rating_count_list TEXT,
+            language_codes TEXT,
+            minimum_os_version TEXT,
+            file_size_bytes INTEGER,
+            screenshot_urls TEXT,
+            ipad_screenshot_urls TEXT,
+            appletv_screenshot_urls TEXT,
+            app_store_url TEXT,
+            artwork_url TEXT,
+            chart_memberships TEXT,
+            scraped_at TEXT,
+            PRIMARY KEY (run_id, track_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS app_rankings (
+            run_id INTEGER NOT NULL,
+            track_id INTEGER NOT NULL,
+            chart_type TEXT NOT NULL,
+            category_id TEXT,
+            category_name TEXT,
+            rank INTEGER,
+            PRIMARY KEY (run_id, track_id, chart_type, category_id)
+        )
+        """,
+    ]
+    cursor = connection.cursor()
+    for stmt in statements:
+        cursor.execute(stmt)
+    cursor.close()
+
+
+def insert_run_cloud(
+    connection,
+    *,
+    source: str,
+    country: str,
+    collection: Optional[str],
+    search_term: Optional[str],
+    limit_requested: int,
+    all_categories: bool,
+    note: Optional[str],
+) -> int:
+    ensure_cloud_schema(connection)
+    created_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        INSERT INTO scrape_runs (
+            created_at, source, country, collection,
+            search_term, limit_requested, all_categories, note
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            created_at,
+            source,
+            country,
+            collection,
+            search_term,
+            limit_requested,
+            int(all_categories),
+            note,
+        ),
+    )
+    run_id = int(cursor.lastrowid)
+    connection.commit()
+    cursor.close()
+    return run_id
+
+
 def main() -> None:
     args = parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level), format="%(levelname)s: %(message)s")
@@ -126,7 +237,7 @@ def main() -> None:
     scraped_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     connection = sqlitecloud.connect(args.connection_uri)
 
-    run_id = insert_run(
+    run_id = insert_run_cloud(
         connection,
         source=source,
         country=args.country,
@@ -155,4 +266,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
