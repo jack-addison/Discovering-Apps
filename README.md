@@ -31,6 +31,13 @@ pip install -r requirements.txt
 - `visualize_scores_interactive.py` – Plotly HTML preview with quick-win filters.
 - `streamlit_app.py` – Streamlit dashboard for interactive exploration (scatter views, quick-win leaderboard, revamped opportunity finder).
 - `streamlit_app_cloud.py` – Streamlit dashboard variant pointing at the hosted SQLiteCloud database.
+- `app_store_scraper_v2_cloud.py` – Cloud-connected Stage 1 scraper (writes snapshots to SQLiteCloud).
+- `app_stage2_analysis_cloud.py` – Stage 2 scoring script targeting SQLiteCloud.
+- `analysis/generate_embeddings_cloud.py` – Generates embeddings directly in SQLiteCloud.
+- `analysis/build_neighbors_cloud.py` – Computes similarity neighbours for the cloud DB.
+- `analysis/build_clusters_cloud.py` – Builds keyword-labelled clusters in SQLiteCloud.
+- `analysis/build_deltas_cloud.py` – Refreshes the `app_snapshot_deltas` table in SQLiteCloud.
+- `run_cloud_pipeline_cloud.sh` – Convenience script that runs the entire cloud pipeline end-to-end.
 - `analysis/generate_embeddings.py` – Creates text embeddings for app snapshots to power similarity analysis.
 - `analysis/build_neighbors.py` – Converts stored embeddings into nearest-neighbour tables for quick “similar apps” lookups.
 - `analysis/build_clusters.py` – Groups embeddings into keyword-labelled clusters for the dashboard.
@@ -179,6 +186,27 @@ python analysis/build_clusters.py --clusters 20 --all-runs
 - Clusters leverage normalised embeddings; keywords are extracted from member descriptions (basic stop-word filtering included).
 - Results populate `app_snapshot_clusters` and `app_snapshot_cluster_members`, which drive the “Similarity clusters” tab.
 - Adjust `--min-cluster-size` to drop or retain small cohorts.
+
+### Cloud workflow
+
+For the hosted dashboard, use the cloud-specific scripts (they target the SQLiteCloud database defined in `cloud_config.py`).
+
+Typical end-to-end refresh:
+
+```bash
+# Example: refresh top-free all categories in the cloud DB
+./run_cloud_pipeline_cloud.sh --collection top-free --all-categories --country us --limit 100 --note "Top free cloud refresh"
+```
+
+The helper script executes:
+- `app_store_scraper_v2_cloud.py` – Stage 1 scrape into SQLiteCloud.
+- `app_stage2_analysis_cloud.py` – Stage 2 scoring.
+- `analysis/build_deltas_cloud.py` – Snapshot deltas.
+- `analysis/generate_embeddings_cloud.py` – Embeddings.
+- `analysis/build_neighbors_cloud.py` – Similarity neighbours.
+- `analysis/build_clusters_cloud.py` – Cluster labels.
+
+Adjust flags as needed (e.g., run multiple scrapes separately for top-paid, keyword searches, etc.).
 
 ## Next steps
 - Schedule recurring Stage 1 scrapes (cron, CI) so your dataset stays fresh.
