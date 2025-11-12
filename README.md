@@ -34,6 +34,7 @@ pip install -r requirements.txt
 - `src/cloud/analysis/` – Cloud variants of the analysis pipelines (deltas, embeddings, neighbours, clusters).
 - `src/cloud/scripts/reuse_stage2_scores_cloud.py` – Reuse logic for Stage 2 scores in SQLiteCloud.
 - `src/prototype/` – Experimental PostgreSQL tooling (Neon schema, migration scripts, Postgres-native scraper).
+- `src/prototype/analysis/` – Neon analysis jobs (dissatisfied-app selection, embeddings, clustering).
 - `apps/local/` – Visualization entry points for local data (`streamlit_app.py`, `visualize_scores.py`, `visualize_scores_interactive.py`).
 - `apps/cloud/` – Cloud Streamlit dashboards (`streamlit_app_cloud.py`, `streamlit_app_neon.py`).
 - `pipelines/local/run_snapshot_refresh.sh` – Local cron-friendly pipeline runner.
@@ -149,7 +150,10 @@ Key notes:
 - Interactive dashboard: `python -m apps.local.visualize_scores_interactive --open` writes an HTML scatter plot to `visualizations/success_vs_build_time.html` and opens it in your browser. Categories are split into free/paid variants, and you can use flags such as `--min-ratings 500`, `--max-build-time 16`, `--min-success 70`, or `--quick-wins-only` to focus on specific cohorts.
 - Streamlit app: `streamlit run apps/local/streamlit_app.py` launches an interactive workspace with filter controls (category, price tier, scrape run selection, rating volume, build time, success score, quick wins toggle), configurable 2D/3D scatter plots (choose axes, colour, bubble size), category summary bars, distribution box plots, a quick-win leaderboard, a similarity cluster explorer, and a revamped Opportunity Finder. The latter now exposes demand dissatisfaction (raw and percentile scores), execution floor controls (success score or success-per-week), cohort metric cards, concise result tables with expandable snapshots, embedded “similar apps” suggestions, and per-category standouts. The sidebar can be widened by tweaking the injected CSS in `apps/local/streamlit_app.py`.
 - Hosted demo: visit [discovering-apps-jack.streamlit.app](https://discovering-apps-jack.streamlit.app) (cloud-backed) to explore the dashboard without running it locally. The hosted instance uses `apps/cloud/streamlit_app_cloud.py`, which reads from the remote SQLiteCloud database.
-- Neon-backed prototype: `streamlit run apps/cloud/streamlit_app_neon.py` reads directly from the Neon PostgreSQL database (set `PROTOTYPE_DATABASE_URL` or `NEON_DATABASE_URL` before launching).
+- Neon-backed prototype: `streamlit run apps/cloud/streamlit_app_neon.py` reads directly from the Neon PostgreSQL database (set `PROTOTYPE_DATABASE_URL` or `NEON_DATABASE_URL` before launching). The app currently exposes:
+  - **Clusters tab** – browse embedding clusters, filter within a cluster by rating threshold / rating count / price tier, and stack-rank members via an opportunity score (rating volume × rating gap) with descriptions inline.
+  - **Apps tab** – simple dropdown to inspect any app scraped into Neon.
+  - **Deltas tab** – day-level view of rating and rating-count deltas plus top positive/negative movers, backed by `app_snapshot_deltas`.
 - Hover a point to inspect the app’s scores, ratings volume, review average, and price. Toggle categories via the legend to declutter the view. The shaded quadrant highlights quick wins (high success score, low build effort).
 
 ## Similarity embeddings (experimental)
@@ -236,6 +240,35 @@ The `src/prototype/` package provides a path to run the full pipeline on Postgre
 5. **Neon-native scraper (optional)**  
    `python -m src.prototype.app_store_scraper_neon --collection top-free --all-categories --limit 400`  
    pulls up to the top 400 apps per category directly into Neon (the script falls back to whatever the feed exposes if fewer than 400 entries exist). Supply `--search-term` for keyword scrapes.
+6. **Snapshot deltas in Neon**  
+   `python -m src.prototype.analysis.build_deltas_neon`  
+   recomputes run-to-run changes (ratings, price, etc.) inside Postgres so the Streamlit deltas tab has fresh data.
+
+### Dissatisfied app pipeline (Neon)
+
+Use this lightweight pipeline to surface categories where lots of users are unhappy, without running Stage 2:
+
+1. Flag high-volume, low-rated apps per category:
+   ```bash
+   python -m src.prototype.analysis.select_dissatisfied --rating-quantile 0.7 --rating-threshold 3
+   ```
+   Adjust the quantile/threshold as needed; only apps above the category’s volume percentile and below the rating cutoff are stored in `app_snapshot_dissatisfied`.
+
+2. Generate embeddings for the flagged cohort (or every snapshot via `--all-snapshots`, always skipping rows that already have vectors):
+   ```bash
+   export OPENAI_API_KEY=sk-...
+   python -m src.prototype.analysis.generate_embeddings_neon --model text-embedding-3-small
+   ```
+
+3. Cluster embeddings to find theme groups:
+   ```bash
+   # For just the dissatisfied cohort
+   python -m src.prototype.analysis.cluster_dissatisfied --clusters 20 --scope-label dissatisfied
+
+   # Or cluster every embedded snapshot in Neon
+   python -m src.prototype.analysis.cluster_all --clusters 40 --scope-label all
+   ```
+   Clusters are written back to `app_snapshot_clusters` / `app_snapshot_cluster_members`, scoped by the label you choose.
 
 ## Next steps
 - Schedule recurring Stage 1 scrapes (cron, CI) so your dataset stays fresh.

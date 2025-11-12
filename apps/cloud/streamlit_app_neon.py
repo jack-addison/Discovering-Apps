@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Streamlit dashboard backed by a Neon PostgreSQL database."""
+"""Neon Streamlit app with cluster browsing support."""
 
 from __future__ import annotations
 
@@ -7,257 +7,85 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-# Ensure repository root is importable when Streamlit runs this file as a script
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from apps.cloud import streamlit_app_cloud as cloud_ui  # type: ignore
-
 NEON_DATABASE_URL = os.environ.get("PROTOTYPE_DATABASE_URL") or os.environ.get("NEON_DATABASE_URL")
-DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
-CACHE_TTL_SECONDS = 900
-
-AXIS_OPTIONS = {
-    "build_time_estimate": "Estimated build time (weeks)",
-    "success_score": "Success score (0-100)",
-    "success_per_week": "Success per week",
-    "number_of_ratings": "Rating count",
-    "review_score": "Average review",
-    "price": "Price (USD)",
-    "number_of_downloads": "Download proxy (ratings)",
-}
+CACHE_TTL_SECONDS = 300
 
 
 @st.cache_resource
 def get_engine() -> Engine:
     if not NEON_DATABASE_URL:
         raise RuntimeError(
-            "NEON_DATABASE_URL environment variable is not set. "
-            "Set it to your Neon connection string before launching the app."
+            "Set PROTOTYPE_DATABASE_URL (or NEON_DATABASE_URL) before launching the app."
         )
     dsn = NEON_DATABASE_URL
     if dsn.startswith("postgres://"):
-        # Normalise legacy postgres:// URLs for SQLAlchemy 2.x
         dsn = dsn.replace("postgres://", "postgresql+psycopg://", 1)
     elif dsn.startswith("postgresql://") and "+" not in dsn:
-        # default to psycopg (v3) driver when no dialect specified
         dsn = dsn.replace("postgresql://", "postgresql+psycopg://", 1)
     return create_engine(dsn, pool_pre_ping=True)
 
 
-def fetch_dataframe(query: str, params: Dict[str, Any] | None = None) -> pd.DataFrame:
-    engine = get_engine()
-    with engine.connect() as conn:
-        df = pd.read_sql_query(text(query), conn, params=params or {})
-    return df
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
+def load_scopes() -> List[str]:
+    query = "SELECT DISTINCT scope FROM app_snapshot_clusters ORDER BY scope"
+    with get_engine().connect() as conn:
+        rows = conn.execute(text(query)).fetchall()
+    return [row[0] for row in rows] or []
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_data() -> pd.DataFrame:
-    query = """
+def load_cluster_data(scope: Optional[str]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    engine = get_engine()
+    scope_filter = "WHERE scope = :scope" if scope else ""
+    params: Dict[str, Any] = {"scope": scope} if scope else {}
+    query_clusters = f"""
+        SELECT id, scope, model, label, keywords_json, size, avg_success, avg_build, avg_demand, created_at
+        FROM app_snapshot_clusters
+        {scope_filter}
+        ORDER BY created_at DESC, size DESC
+    """
+    query_members = """
         SELECT
+            m.cluster_id,
             s.run_id,
-            COALESCE(sr.created_at, s.scraped_at) AS run_created_at,
             s.track_id,
             s.name,
             s.primary_genre_name AS category,
-            s.build_time_estimate,
-            s.success_score,
-            s.success_reasoning,
-            s.user_rating_count AS number_of_ratings,
-            s.average_user_rating AS review_score,
-            s.user_rating_count AS number_of_downloads,
             s.price,
             s.currency,
-            s.seller_name AS developer,
-            s.description,
-            s.language_codes,
-            s.chart_memberships,
-            s.scraped_at,
             s.is_free,
-            s.has_in_app_purchases
-        FROM app_snapshots s
-        LEFT JOIN scrape_runs sr ON sr.id = s.run_id
-        WHERE s.build_time_estimate IS NOT NULL
-          AND s.success_score IS NOT NULL
-    """
-    df = fetch_dataframe(query)
-    if df.empty:
-        raise ValueError("No rows with Stage 2 scores found in the database.")
-
-    df["price"] = df["price"].fillna(0.0)
-    df["run_created_at"] = pd.to_datetime(
-        df["run_created_at"].fillna(df["scraped_at"]), errors="coerce"
-    )
-    df["run_date"] = df["run_created_at"].dt.date
-    df["run_created_at_str"] = df["run_created_at"].dt.strftime("%Y-%m-%d %H:%M")
-    df["price_tier"] = np.where(df["price"] > 0, "Paid", "Free")
-    df["category_clean"] = df["category"].fillna("Unknown")
-    df["language_codes"] = df["language_codes"].apply(
-        lambda codes: ", ".join(json.loads(codes)) if isinstance(codes, str) else None
-    )
-    df["chart_memberships"] = df["chart_memberships"].apply(
-        lambda memberships: json.loads(memberships) if isinstance(memberships, str) else []
-    )
-    df["category_segment"] = df["category_clean"] + " (" + df["price_tier"] + ")"
-    df["success_per_week"] = df["success_score"] / df["build_time_estimate"].replace(0, np.nan)
-    df["confidence_proxy"] = np.log10(df["number_of_ratings"].fillna(0) + 1)
-    df["bubble_size"] = 20 + df["confidence_proxy"] * 25
-    df["quick_win"] = (df["build_time_estimate"] <= 12) & (df["success_score"] >= 70)
-    df["demand_dissatisfaction"] = df["number_of_ratings"].fillna(0) * (5.0 - df["review_score"].fillna(5.0))
-    diss_values = df["demand_dissatisfaction"].replace([np.inf, -np.inf], np.nan)
-    if diss_values.notna().any():
-        df["demand_dissatisfaction_percentile"] = diss_values.rank(pct=True) * 100
-    else:
-        df["demand_dissatisfaction_percentile"] = 0.0
-    return df
-
-
-@st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_run_catalog() -> pd.DataFrame:
-    query = """
-        SELECT
-            r.id AS run_id,
-            COALESCE(r.created_at, MIN(s.scraped_at)) AS run_created_at,
-            r.source,
-            r.note
-        FROM scrape_runs r
-        LEFT JOIN app_snapshots s ON s.run_id = r.id
-        GROUP BY r.id, r.created_at, r.source, r.note
-    """
-    df = fetch_dataframe(query)
-    if df.empty:
-        return df
-    df["run_created_at"] = pd.to_datetime(df["run_created_at"], errors="coerce")
-    df["run_date"] = df["run_created_at"].dt.date
-    return df
-
-
-@st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_snapshot_total(run_ids: Sequence[int] | None = None) -> Optional[int]:
-    if run_ids:
-        run_id_tuple = tuple(run_ids)
-        placeholders = ", ".join(f":run_{idx}" for idx in range(len(run_id_tuple)))
-        query = f"SELECT COUNT(*) AS total FROM app_snapshots WHERE run_id IN ({placeholders})"
-        params = {f"run_{idx}": run_id for idx, run_id in enumerate(run_id_tuple)}
-    else:
-        query = "SELECT COUNT(*) AS total FROM app_snapshots"
-        params = None
-    df = fetch_dataframe(query, params)
-    if df.empty:
-        return None
-    return int(df.iloc[0]["total"])
-
-
-@st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_neighbors(model: str = DEFAULT_EMBEDDING_MODEL) -> Dict[Tuple[int, int], List[dict]]:
-    query = """
-        SELECT
-            n.run_id,
-            n.track_id,
-            n.neighbor_run_id,
-            n.neighbor_track_id,
-            n.similarity,
-            n.rank,
-            s.name AS neighbor_name,
-            s.primary_genre_name AS neighbor_category,
-            s.price AS neighbor_price,
-            s.currency AS neighbor_currency,
-            s.is_free AS neighbor_is_free,
-            s.success_score AS neighbor_success_score,
-            s.build_time_estimate AS neighbor_build_time,
-            s.user_rating_count AS neighbor_rating_count,
-            s.average_user_rating AS neighbor_review_score
-        FROM app_snapshot_neighbors n
+            s.average_user_rating,
+            s.user_rating_count,
+            s.success_score,
+            s.build_time_estimate,
+            m.distance
+        FROM app_snapshot_cluster_members m
         JOIN app_snapshots s
-          ON s.run_id = n.neighbor_run_id
-         AND s.track_id = n.neighbor_track_id
-        WHERE n.model = :model
-        ORDER BY n.run_id DESC, n.track_id, n.rank
+          ON s.run_id = m.run_id
+         AND s.track_id = m.track_id
+        WHERE EXISTS (
+            SELECT 1 FROM app_snapshot_clusters c
+            WHERE c.id = m.cluster_id
+            """ + ("AND c.scope = :scope" if scope else "") + """
+        )
     """
-    df = fetch_dataframe(query, {"model": model})
-    if df.empty:
-        return {}
-
-    df["neighbor_price_label"] = np.where(
-        df["neighbor_is_free"].fillna(False).astype(bool) | df["neighbor_price"].fillna(0).eq(0),
-        "Free",
-        df["neighbor_price"].fillna(0).map(lambda p: f"${p:.2f}"),
-    )
-    df["neighbor_similarity_pct"] = (df["similarity"] * 100).round(1)
-
-    neighbor_map: Dict[Tuple[int, int], List[dict]] = {}
-    grouped = df.groupby(["run_id", "track_id"], sort=False)
-    for (run_id, track_id), group in grouped:
-        neighbor_map[(run_id, track_id)] = [
-            {
-                "neighbor_run_id": row["neighbor_run_id"],
-                "neighbor_track_id": row["neighbor_track_id"],
-                "name": row["neighbor_name"],
-                "category": row["neighbor_category"],
-                "price_label": row["neighbor_price_label"],
-                "similarity": float(row["similarity"]),
-                "similarity_pct": float(row["neighbor_similarity_pct"]),
-                "rank": int(row["rank"]),
-                "success_score": row["neighbor_success_score"],
-                "build_time_estimate": row["neighbor_build_time"],
-                "rating_count": row["neighbor_rating_count"],
-                "review_score": row["neighbor_review_score"],
-            }
-            for _, row in group.iterrows()
-        ]
-    return neighbor_map
-
-
-@st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_cluster_data(model: str = DEFAULT_EMBEDDING_MODEL) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    clusters_df = fetch_dataframe(
-        """
-            SELECT id, scope, model, label, keywords_json, size, avg_success, avg_build, avg_demand, created_at
-            FROM app_snapshot_clusters
-            WHERE model = :model
-            ORDER BY size DESC
-        """,
-        {"model": model},
-    )
-    members_df = fetch_dataframe(
-        """
-            SELECT
-                m.cluster_id,
-                m.run_id,
-                m.track_id,
-                m.distance,
-                s.name,
-                s.primary_genre_name AS category,
-                s.price,
-                s.currency,
-                s.is_free,
-                s.success_score,
-                s.build_time_estimate,
-                s.user_rating_count,
-                s.average_user_rating
-            FROM app_snapshot_cluster_members AS m
-            JOIN app_snapshot_clusters AS c
-              ON c.id = m.cluster_id
-            JOIN app_snapshots AS s
-              ON s.run_id = m.run_id
-             AND s.track_id = m.track_id
-            WHERE c.model = :model
-        """,
-        {"model": model},
-    )
-
+    with engine.connect() as conn:
+        clusters_df = pd.read_sql_query(text(query_clusters), conn, params=params)
+        members_df = pd.read_sql_query(text(query_members), conn, params=params)
+        descriptions = pd.read_sql_query(text("SELECT run_id, track_id, description FROM app_snapshots"), conn)
+    members_df = members_df.merge(descriptions, on=["run_id", "track_id"], how="left")
     if clusters_df.empty or members_df.empty:
         return pd.DataFrame(), pd.DataFrame()
 
@@ -268,562 +96,398 @@ def load_cluster_data(model: str = DEFAULT_EMBEDDING_MODEL) -> Tuple[pd.DataFram
         lambda row: f"{row['label']} ({row['size']})" if row.get("label") else f"Cluster {row['id']} ({row['size']})",
         axis=1,
     )
-    clusters_df["avg_success_display"] = clusters_df["avg_success"].map(lambda x: f"{x:.1f}" if pd.notna(x) else "–")
+    clusters_df["avg_success_display"] = clusters_df["avg_success"].map(lambda x: f"{x:.2f}" if pd.notna(x) else "–")
     clusters_df["avg_build_display"] = clusters_df["avg_build"].map(lambda x: f"{x:.1f}" if pd.notna(x) else "–")
     clusters_df["avg_demand_display"] = clusters_df["avg_demand"].map(lambda x: f"{x:.0f}" if pd.notna(x) else "–")
 
-    members_df["price_label"] = np.where(
-        members_df["is_free"].fillna(False).astype(bool) | members_df["price"].fillna(0).eq(0),
-        "Free",
-        members_df["price"].fillna(0).map(lambda p: f"${p:.2f}"),
-    )
+    members_df["price_label"] = members_df["price"].fillna(0).map(lambda p: "Free" if p == 0 else f"${p:.2f}")
     members_df["distance"] = members_df["distance"].astype(float)
-    members_df["similarity"] = 1 - members_df["distance"].clip(lower=0)
-    members_df["similarity_pct"] = (members_df["similarity"] * 100).round(1)
-
+    members_df["similarity_pct"] = (1 - members_df["distance"]).clip(lower=0).round(3) * 100
     return clusters_df, members_df
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_feature_table() -> Optional[pd.DataFrame]:
-    try:
-        df = fetch_dataframe("SELECT * FROM app_snapshot_deltas")
-    except Exception:
-        return None
+def load_app_names() -> List[str]:
+    query = """
+        SELECT DISTINCT name
+        FROM app_snapshots
+        WHERE name IS NOT NULL
+        ORDER BY name ASC
+    """
+    with get_engine().connect() as conn:
+        rows = conn.execute(text(query)).fetchall()
+    return [row[0] for row in rows]
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
+def load_deltas_data() -> pd.DataFrame:
+    query = "SELECT * FROM app_snapshot_deltas"
+    with get_engine().connect() as conn:
+        df = pd.read_sql_query(text(query), conn)
     if df.empty:
-        return None
-    if "run_created_at" in df.columns:
-        df["run_created_at"] = pd.to_datetime(df["run_created_at"], errors="coerce")
-    if "is_new_track" in df.columns:
-        df["is_new_track"] = df["is_new_track"].astype(bool)
-    if "price_changed" in df.columns:
-        df["price_changed"] = df["price_changed"].astype(bool)
+        return df
+    df["run_created_at"] = pd.to_datetime(df["run_created_at"], errors="coerce")
+    df["prev_run_created_at"] = pd.to_datetime(df["prev_run_created_at"], errors="coerce")
+    df["is_new_track"] = df["is_new_track"].fillna(False).astype(bool)
+    df["price_changed"] = df["price_changed"].fillna(False).astype(bool)
     return df
 
 
-# The remainder of the file can reuse the UI/rendering logic from streamlit_app_cloud.py
-# ------------------------------------------------------------------------------
-CATEGORY_HELP = "Use filters on the left to scope to categories, price tiers, and runs."
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
+def load_dissatisfied_counts() -> pd.DataFrame:
+    query = """
+        SELECT
+            d.run_id,
+            COALESCE(sr.created_at, MAX(s.scraped_at)) AS run_created_at,
+            COUNT(*) AS flagged
+        FROM app_snapshot_dissatisfied d
+        LEFT JOIN scrape_runs sr ON sr.id = d.run_id
+        LEFT JOIN app_snapshots s
+          ON s.run_id = d.run_id
+         AND s.track_id = d.track_id
+        GROUP BY d.run_id, sr.created_at
+        ORDER BY d.run_id
+    """
+    with get_engine().connect() as conn:
+        df = pd.read_sql_query(text(query), conn)
+    if df.empty:
+        return df
+    df["run_created_at"] = pd.to_datetime(df["run_created_at"], errors="coerce")
+    return df
 
 
-def render_sidebar(df: pd.DataFrame, run_catalog: pd.DataFrame) -> dict:
-    st.sidebar.header("Filters")
-
-    categories = sorted(df["category_clean"].dropna().unique())
-    selected_categories = st.sidebar.multiselect(
-        "Categories",
-        options=categories,
-        default=categories,
-    )
-
-    price_tiers = sorted(df["price_tier"].unique())
-    selected_tiers = st.sidebar.multiselect(
-        "Price tier",
-        options=price_tiers,
-        default=price_tiers,
-    )
-
-    if run_catalog.empty:
-        available_runs = pd.DataFrame(columns=["run_id", "run_date"])
-    else:
-        available_runs = run_catalog.copy()
-    run_dates = sorted(available_runs["run_date"].dropna().unique(), reverse=True)
-    show_all_dates = st.sidebar.checkbox("Show all scrape dates", value=not run_dates)
-    if not show_all_dates and run_dates:
-        default_date = run_dates[0]
-        selected_date = st.sidebar.date_input(
-            "Scrape date", value=default_date, min_value=min(run_dates), max_value=max(run_dates)
-        )
-        if isinstance(selected_date, list):
-            selected_dates = selected_date
-        else:
-            selected_dates = [selected_date]
-        selected_runs = (
-            available_runs[available_runs["run_date"].isin(selected_dates)]["run_id"]
-            .unique()
-            .tolist()
-        )
-    else:
-        selected_runs = available_runs["run_id"].unique().tolist()
-
-    min_ratings = int(df["number_of_ratings"].fillna(0).min())
-    max_ratings = int(df["number_of_ratings"].fillna(0).max())
-    ratings_range = st.sidebar.slider(
-        "User rating count",
-        min_value=min_ratings,
-        max_value=max_ratings,
-        value=(min_ratings, max_ratings),
-    )
-
-    build_range = st.sidebar.slider(
-        "Estimated build time (weeks)",
-        min_value=float(df["build_time_estimate"].min()),
-        max_value=float(df["build_time_estimate"].max()),
-        value=(float(df["build_time_estimate"].min()), float(df["build_time_estimate"].max())),
-    )
-
-    success_range = st.sidebar.slider(
-        "Success score",
-        min_value=float(df["success_score"].min()),
-        max_value=float(df["success_score"].max()),
-        value=(float(df["success_score"].min()), float(df["success_score"].max())),
-    )
-
-    quick_win_only = st.sidebar.toggle(
-        "Quick wins only (≤12 weeks & ≥70 score)",
-        value=False,
-    )
-
-    return {
-        "categories": selected_categories,
-        "price_tiers": selected_tiers,
-        "run_ids": selected_runs,
-        "ratings_range": ratings_range,
-        "build_range": build_range,
-        "success_range": success_range,
-        "quick_win_only": quick_win_only,
-    }
-
-
-def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
-    if filters["run_ids"]:
-        filtered = df[df["run_id"].isin(filters["run_ids"])]
-    else:
-        filtered = df.copy()
-
-    filtered = filtered[
-        filtered["category_clean"].isin(filters["categories"])
-        & filtered["price_tier"].isin(filters["price_tiers"])
-    ]
-    low_ratings, high_ratings = filters["ratings_range"]
-    filtered = filtered[
-        filtered["number_of_ratings"].fillna(0).between(low_ratings, high_ratings)
-    ]
-    low_build, high_build = filters["build_range"]
-    filtered = filtered[
-        filtered["build_time_estimate"].between(low_build, high_build)
-    ]
-    low_success, high_success = filters["success_range"]
-    filtered = filtered[
-        filtered["success_score"].between(low_success, high_success)
-    ]
-    if filters["quick_win_only"]:
-        filtered = filtered[filtered["quick_win"]]
-    return filtered
-
-
-def plot_scatter(
-    df: pd.DataFrame,
-    *,
-    x_field: str,
-    y_field: str,
-    color_field: str,
-    size_field: str,
-) -> px.scatter:
-    color_map = {
-        category: px.colors.qualitative.Set3[idx % len(px.colors.qualitative.Set3)]
-        for idx, category in enumerate(sorted(df["category_segment"].unique()))
-    }
-    fig = px.scatter(
-        df,
-        x=x_field,
-        y=y_field,
-        color=color_field,
-        size=size_field,
-        hover_name="name",
-        hover_data={
-            "developer": True,
-            "category_clean": True,
-            "price_tier": True,
-            "price": ":.2f",
-            "success_per_week": ":.2f",
-            "number_of_ratings": True,
-            "review_score": ":.2f",
-        },
-        color_discrete_map=color_map if color_field == "category_segment" else None,
-        height=700,
-    )
-    fig.update_traces(marker=dict(line=dict(width=0.5, color="rgba(0,0,0,0.3)"), opacity=0.75))
-    fig.update_layout(
-        title=f"{AXIS_OPTIONS.get(y_field, y_field)} vs {AXIS_OPTIONS.get(x_field, x_field)}",
-        xaxis_title=AXIS_OPTIONS.get(x_field, x_field),
-        yaxis_title=AXIS_OPTIONS.get(y_field, y_field),
-        legend_title="Category (price tier)" if color_field == "category_segment" else color_field.replace("_", " ").title(),
-        template="plotly_white",
-        margin=dict(l=40, r=40, t=80, b=40),
-    )
-    if x_field == "build_time_estimate" and y_field == "success_score":
-        fig.add_shape(
-            type="rect",
-            x0=0,
-            y0=70,
-            x1=12,
-            y1=100,
-            fillcolor="rgba(0, 200, 150, 0.08)",
-            line=dict(color="rgba(0, 200, 150, 0.3)", dash="dash"),
-        )
-        fig.add_annotation(
-            x=6,
-            y=95,
-            text="Quick wins zone",
-            showarrow=False,
-            font=dict(color="rgba(0,120,90,0.9)", size=12),
-        )
-    return fig
-
-
-# Remaining rendering helpers (3D scatter, summary plots, tables) match the
-# cloud version. Reuse them to keep behaviour consistent.
-plot_scatter_3d = cloud_ui.plot_scatter_3d
-plot_category_summary = cloud_ui.plot_category_summary
-plot_success_distribution = cloud_ui.plot_success_distribution
-render_top_table = cloud_ui.render_top_table
-render_opportunity_finder = cloud_ui.render_opportunity_finder
-render_similarity_clusters = cloud_ui.render_similarity_clusters
-
-
-def main() -> None:
-    st.set_page_config(
-        page_title="App Store Opportunity Explorer (Neon)",
-        page_icon="📈",
-        layout="wide",
-    )
-    st.title("App Store Opportunity Explorer – Neon Edition")
-    st.caption("Backed by the Neon-hosted PostgreSQL database.")
-
-    try:
-        df = load_data()
-    except RuntimeError as err:
-        st.error(str(err))
-        st.stop()
-    except Exception as err:  # noqa: BLE001
-        st.exception(err)
-        st.stop()
-
-    run_catalog = load_run_catalog()
-    filters = render_sidebar(df, run_catalog)
-    filtered_df = apply_filters(df, filters)
-
-    if filtered_df.empty:
-        st.warning("No apps match the current filter combination. Charts may appear blank.")
-
-    total_snapshots = load_snapshot_total(tuple(filters["run_ids"]))
-    render_metrics(filtered_df, total_snapshots)
-
-    feature_df = load_feature_table()
-    neighbor_lookup = load_neighbors()
-    clusters_df, members_df = load_cluster_data()
-
-    tab_labels = [
-        "Scatter plot",
-        "3D scatter",
-        "Category summary",
-        "Success distribution",
-        "Quick-win table",
-        "Similarity clusters",
-        "Opportunity finder",
-    ]
-    if feature_df is not None:
-        tab_labels.append("Deltas")
-
-    tabs = st.tabs(tab_labels)
-    tab_scatter = tabs[0]
-    tab_scatter_3d = tabs[1]
-    tab_summary = tabs[2]
-    tab_distribution = tabs[3]
-    tab_table = tabs[4]
-    tab_clusters = tabs[5]
-    tab_opportunities = tabs[6]
-    tab_deltas = tabs[7] if feature_df is not None else None
-
-    with tab_scatter:
-        controls_col, chart_col = st.columns([1, 3])
-        with controls_col:
-            st.caption("Map different metrics to each axis/encoding.")
-            x_field = st.selectbox(
-                "X-axis",
-                options=list(AXIS_OPTIONS.keys()),
-                index=list(AXIS_OPTIONS.keys()).index("build_time_estimate"),
-                format_func=lambda key: AXIS_OPTIONS[key],
-                key="scatter_x_axis",
-            )
-            y_field = st.selectbox(
-                "Y-axis",
-                options=list(AXIS_OPTIONS.keys()),
-                index=list(AXIS_OPTIONS.keys()).index("success_score"),
-                format_func=lambda key: AXIS_OPTIONS[key],
-                key="scatter_y_axis",
-            )
-            color_field = st.selectbox(
-                "Colour by",
-                options=["category_segment", "price_tier"],
-                index=0,
-                format_func=lambda key: "Category" if key == "category_segment" else "Price tier",
-                key="scatter_color_field",
-            )
-            size_field = st.selectbox(
-                "Bubble size",
-                options=["bubble_size", "number_of_ratings", "success_per_week"],
-                index=0,
-                format_func=lambda key: {
-                    "bubble_size": "Confidence (log ratings)",
-                    "number_of_ratings": "Rating count",
-                    "success_per_week": "Success per week",
-                }[key],
-                key="scatter_size_field",
-            )
-        with chart_col:
-            fig = plot_scatter(
-                filtered_df,
-                x_field=x_field,
-                y_field=y_field,
-                color_field=color_field,
-                size_field=size_field,
-            )
-            st.plotly_chart(fig, config={"displayModeBar": False})
-        st.caption(
-            "Use the legend and lasso/box select tools to inspect specific cohorts."
-        )
-        st.caption("This scatter compares effort vs. success for the filtered apps; adjust controls to explore variations.")
-
-    with tab_scatter_3d:
-        fig_3d = plot_scatter_3d(
-            filtered_df,
-            z_axis="success_per_week",
-            color_field="category_segment",
-        )
-        st.plotly_chart(fig_3d, config={"displayModeBar": False})
-
-    with tab_summary:
-        summary_fig = plot_category_summary(filtered_df)
-        st.plotly_chart(summary_fig, config={"displayModeBar": False})
-
-    with tab_distribution:
-        dist_fig = plot_success_distribution(filtered_df)
-        st.plotly_chart(dist_fig, config={"displayModeBar": False})
-
-    with tab_table:
-        render_top_table(filtered_df)
-
-    with tab_clusters:
-        render_similarity_clusters(filtered_df, clusters_df, members_df)
-
-    with tab_opportunities:
-        render_opportunity_finder(filtered_df, neighbor_lookup)
-
-    if tab_deltas is not None and feature_df is not None:
-        with tab_deltas:
-            render_deltas_tab(feature_df, filters)
-
-
-def render_metrics(df: pd.DataFrame, total_available: int | None) -> None:
-    total_apps = len(df)
-    display_total = f"{total_apps:,}"
-    if total_available and total_available >= 0:
-        display_total = f"{total_apps:,} / {total_available:,}"
-
-    quick_wins = int(df["quick_win"].sum()) if "quick_win" in df else 0
-    avg_success = (
-        df["success_score"].mean() if "success_score" in df and not df.empty else None
-    )
-    avg_build = (
-        df["build_time_estimate"].mean()
-        if "build_time_estimate" in df and not df.empty
-        else None
-    )
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Apps", display_total)
-    col2.metric("Quick wins", f"{quick_wins:,}")
-    col3.metric(
-        "Average success",
-        f"{avg_success:.1f}" if avg_success is not None else "–",
-    )
-    col4.metric(
-        "Average build weeks",
-        f"{avg_build:.1f}" if avg_build is not None else "–",
-    )
-
-
-def render_deltas_tab(feature_df: pd.DataFrame, filters: dict) -> None:
-    st.subheader("Snapshot deltas (experimental)")
-    st.caption("Comparing successive runs per app. Data sourced from app_snapshot_deltas.")
-    st.caption("Track how success and rank metrics shift between runs. Use the metric toggle to focus on score or leaderboard movement.")
-
-    delta_view = feature_df.copy()
-    if filters["run_ids"]:
-        delta_view = delta_view[delta_view["run_id"].isin(filters["run_ids"])]
-
-    if delta_view.empty:
-        st.info("No delta data available for the current run filters.")
+def render_clusters_tab() -> None:
+    scopes = load_scopes()
+    if not scopes:
+        st.info("No clusters found. Generate embeddings and run the clustering job first.")
         return
 
-    metric_choice = st.selectbox(
-        "Metric",
-        options=["Success score", "Rank position"],
-        index=0,
+    selected_scope = st.selectbox("Cluster scope", scopes, index=0)
+    clusters_df, members_df = load_cluster_data(selected_scope)
+    if clusters_df.empty or members_df.empty:
+        st.info("No cluster data for the selected scope.")
+        return
+
+    overview = clusters_df[
+        ["id", "label_display", "size", "avg_success_display", "avg_build_display", "avg_demand_display", "keywords"]
+    ].copy()
+    overview = overview.rename(
+        columns={
+            "label_display": "Cluster",
+            "size": "Apps",
+            "avg_success_display": "Avg success",
+            "avg_build_display": "Avg build weeks",
+            "avg_demand_display": "Avg demand",
+            "keywords": "Keywords",
+        }
+    )
+    overview.insert(0, "Inspect", False)
+
+    edited = st.data_editor(
+        overview.head(200),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Inspect": st.column_config.CheckboxColumn(
+                help="Check a cluster to preview its members below.",
+                default=False,
+            )
+        },
+        key="neon_cluster_overview",
     )
 
-    if metric_choice == "Success score":
-        delta_col = "delta_success"
-        delta_label = "Δ Success"
-        run_title = "Average Δ success per run"
-        run_ylabel = "Δ Success"
-        improve_title = "Top improvers (success score)"
-        decline_title = "Top decliners (success score)"
-        category_title = "Category Δ success"
-        improve_sort = lambda frame: frame.sort_values("delta_success", ascending=False).head(10)
-        decline_sort = lambda frame: frame.sort_values("delta_success", ascending=True).head(10)
+    selected_ids = edited.loc[edited["Inspect"], "id"].tolist()
+    if selected_ids:
+        cluster_id = selected_ids[0]
     else:
-        delta_col = "delta_rank"
-        delta_label = "Δ Rank"
-        run_title = "Average Δ rank per run"
-        run_ylabel = "Δ Rank"
-        improve_title = "Biggest rank climbers"
-        decline_title = "Biggest rank drops"
-        category_title = "Category Δ rank"
-        improve_sort = lambda frame: frame.sort_values("delta_rank", ascending=True).head(10)
-        decline_sort = lambda frame: frame.sort_values("delta_rank", ascending=False).head(10)
+        cluster_id = clusters_df.iloc[0]["id"]
 
-    comparables = delta_view.copy()
-    comparables[delta_label] = comparables[delta_col]
+    current_cluster = clusters_df.loc[clusters_df["id"] == cluster_id].iloc[0]
+    keywords = ", ".join(current_cluster.get("keywords", [])) or "Unlabelled"
 
+    metric_cols = st.columns(2)
+    metric_cols[0].metric("Apps", int(current_cluster["size"]))
+    metric_cols[1].metric("Avg rating", current_cluster["avg_success_display"])
+    st.caption(f"Keywords: {keywords}")
+
+    member_rows = members_df[members_df["cluster_id"] == cluster_id].copy()
+
+    st.divider()
+    st.markdown("#### Opportunity filters")
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    max_rating = float(member_rows["average_user_rating"].max(skipna=True) or 5.0)
+    rating_threshold = filter_col1.slider(
+        "Max average rating",
+        min_value=1.0,
+        max_value=5.0,
+        value=min(3.0, max_rating),
+        step=0.1,
+        help="Only show apps whose average rating is below this value.",
+    )
+    default_min_ratings = int(member_rows["user_rating_count"].mean() or 0)
+    min_ratings = filter_col2.number_input(
+        "Min rating count",
+        min_value=0,
+        value=default_min_ratings,
+        step=10,
+        help="Ignore low-volume apps by requiring at least this many ratings.",
+    )
+    price_options = ["Free", "Paid"]
+    selected_prices = filter_col3.multiselect(
+        "Price tier",
+        options=price_options,
+        default=price_options,
+    )
+
+    filtered = member_rows.copy()
+    filtered = filtered[
+        (filtered["average_user_rating"].fillna(5.0) <= rating_threshold)
+        & (filtered["user_rating_count"].fillna(0) >= min_ratings)
+        & (filtered["price_label"].apply(lambda label: ("Free" if label == "Free" else "Paid") in selected_prices))
+    ]
+
+    filtered["rating_gap"] = (rating_threshold - filtered["average_user_rating"]).clip(lower=0)
+    filtered["opportunity_score"] = filtered["user_rating_count"].fillna(0) * filtered["rating_gap"]
+    member_rows["rating_gap"] = (rating_threshold - member_rows["average_user_rating"]).clip(lower=0)
+    member_rows["opportunity_score"] = member_rows["user_rating_count"].fillna(0) * member_rows["rating_gap"]
+    st.caption(
+        "Opportunity score = rating count × (max rating threshold − average rating)."
+        " Higher scores highlight popular apps with low satisfaction."
+    )
+    filtered.sort_values(["opportunity_score", "user_rating_count"], ascending=False, inplace=True)
+
+    top_opportunities = filtered.head(20)[
+        [
+            "name",
+            "category",
+            "price_label",
+            "average_user_rating",
+            "user_rating_count",
+            "opportunity_score",
+            "description",
+        ]
+    ].rename(
+        columns={
+            "name": "App",
+            "category": "Category",
+            "price_label": "Price",
+            "average_user_rating": "Avg rating",
+            "user_rating_count": "Rating count",
+            "opportunity_score": "Opportunity score",
+            "description": "Description",
+        }
+    )
+
+    st.markdown("#### Top opportunities")
+    st.dataframe(
+        top_opportunities,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Avg rating": st.column_config.NumberColumn(format="%.2f"),
+            "Rating count": st.column_config.NumberColumn(format="%d"),
+            "Opportunity score": st.column_config.NumberColumn(format="%.1f"),
+        },
+    )
+
+    st.markdown("#### Cluster members (full list)")
+    member_rows.sort_values("similarity_pct", ascending=False, inplace=True)
+    display = member_rows[
+        [
+            "name",
+            "category",
+            "price_label",
+            "average_user_rating",
+            "user_rating_count",
+            "similarity_pct",
+            "opportunity_score",
+            "description",
+        ]
+    ].rename(
+        columns={
+            "name": "App",
+            "category": "Category",
+            "price_label": "Price",
+            "average_user_rating": "Avg rating",
+            "user_rating_count": "Rating count",
+            "similarity_pct": "Similarity %",
+            "opportunity_score": "Opportunity score",
+            "description": "Description",
+        }
+    )
+    st.dataframe(
+        display,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Avg rating": st.column_config.NumberColumn(format="%.2f"),
+            "Rating count": st.column_config.NumberColumn(format="%d"),
+            "Similarity %": st.column_config.NumberColumn(format="%.1f"),
+            "Opportunity score": st.column_config.NumberColumn(format="%.1f"),
+        },
+    )
+
+
+def render_apps_tab() -> None:
+    app_names = load_app_names()
+    if not app_names:
+        st.info("No apps found. Run the scraper first.")
+        return
+    st.selectbox("All apps", options=app_names, index=0, label_visibility="visible")
+
+
+def render_deltas_tab() -> None:
+    deltas_df = load_deltas_data()
+    if deltas_df.empty:
+        st.info("No delta data available. Run the Neon delta builder script first.")
+        return
+
+    run_options = sorted(deltas_df["run_id"].unique(), reverse=True)
+    default_runs = run_options[: min(5, len(run_options))]
+    selected_runs = st.multiselect(
+        "Filter runs",
+        options=run_options,
+        default=default_runs,
+        help="Choose specific run IDs to focus on recent changes.",
+    )
+    if selected_runs:
+        view = deltas_df[deltas_df["run_id"].isin(selected_runs)].copy()
+    else:
+        view = deltas_df.copy()
+
+    if view.empty:
+        st.warning("No delta rows match the selected filters.")
+        return
+
+    metric_config = {
+        "Rating average": {
+            "col": "delta_rating",
+            "label": "Δ rating",
+            "run_title": "Average Δ rating by run",
+            "run_ylabel": "Avg Δ rating",
+            "category_title": "Top categories by avg Δ rating",
+            "improve_title": "Top positive movers (rating)",
+            "decline_title": "Top negative movers (rating)",
+            "improve_sort": lambda df: df.nlargest(10, "delta_rating"),
+            "decline_sort": lambda df: df.nsmallest(10, "delta_rating"),
+            "note": "Positive values indicate improving user ratings.",
+        },
+        "Rating count": {
+            "col": "delta_rating_count",
+            "label": "Δ rating count",
+            "run_title": "Average Δ rating count by run",
+            "run_ylabel": "Avg Δ rating count",
+            "category_title": "Top categories by avg Δ rating count",
+            "improve_title": "Top positive movers (rating volume)",
+            "decline_title": "Top negative movers (rating volume)",
+            "improve_sort": lambda df: df.nlargest(10, "delta_rating_count"),
+            "decline_sort": lambda df: df.nsmallest(10, "delta_rating_count"),
+            "note": "Positive values mean the app accumulated more ratings since the prior run.",
+        },
+    }
+
+    metric_choice = st.radio(
+        "Metric",
+        options=list(metric_config.keys()),
+        index=0,
+        horizontal=True,
+    )
+    config = metric_config[metric_choice]
+    delta_col = config["col"]
+
+    comparables = view[~view["is_new_track"]].copy()
+    col_a, col_b, col_c, col_d = st.columns(4)
+    avg_delta = comparables[delta_col].dropna().mean()
+    col_a.metric(config["label"], f"{avg_delta:+.3f}" if pd.notna(avg_delta) else "--", help=config["note"])
+    avg_rating_delta = comparables["delta_rating"].dropna().mean()
+    col_b.metric("Avg Δ rating (all)", f"{avg_rating_delta:+.3f}" if pd.notna(avg_rating_delta) else "--")
+    col_c.metric("New apps this window", int(view["is_new_track"].sum()))
+    median_gap = comparables["days_since_prev"].dropna().median()
+    col_d.metric("Median days between runs", f"{median_gap:.1f}" if pd.notna(median_gap) else "--")
+
+    comparables["run_date"] = comparables["run_created_at"].dt.date
     run_summary = (
-        comparables.groupby(["run_id", "run_created_at"], as_index=False)
-        .agg(
-            avg_delta_metric=(delta_col, "mean"),
-            avg_delta_build=("delta_build_time", "mean"),
-            returning_apps=("track_id", "count"),
-        )
-        .sort_values("run_created_at")
+        comparables.dropna(subset=[delta_col])
+        .groupby(["run_date"], as_index=False)
+        .agg(avg_delta=(delta_col, "mean"), returning_apps=("track_id", "count"))
+        .sort_values("run_date")
     )
     if not run_summary.empty:
-        run_summary["run_created_at"] = pd.to_datetime(
-            run_summary["run_created_at"], errors="coerce"
-        )
-        run_summary = run_summary.dropna(subset=["avg_delta_metric"])
-
-    run_new = (
-        delta_view.groupby(["run_id", "run_created_at"], as_index=False)
-        .agg(new_apps=("is_new_track", "sum"))
-    )
-    if not run_new.empty:
-        run_new["run_created_at"] = pd.to_datetime(run_new["run_created_at"], errors="coerce")
-        run_new = run_new.dropna(subset=["new_apps"])
-
-    col_line, col_bar = st.columns(2)
-    if not run_summary.empty and run_summary["run_created_at"].notna().any():
-        fig_delta = px.line(
+        fig_runs = px.line(
             run_summary,
-            x="run_created_at",
-            y="avg_delta_metric",
+            x="run_date",
+            y="avg_delta",
             markers=True,
-            title=run_title,
+            title=config["run_title"],
         )
-        fig_delta.update_layout(xaxis_title="Run", yaxis_title=run_ylabel)
-        col_line.plotly_chart(fig_delta, config={"displayModeBar": False})
-    elif not run_summary.empty:
-        fig_delta = px.line(
-            run_summary,
-            x="run_id",
-            y="avg_delta_metric",
-            markers=True,
-            title=f"{run_title} (by run id)",
-        )
-        fig_delta.update_layout(xaxis_title="Run ID", yaxis_title=run_ylabel)
-        col_line.plotly_chart(fig_delta, config={"displayModeBar": False})
-    else:
-        col_line.info("Not enough data to compute average deltas yet.")
-
-    if not run_new.empty and run_new["run_created_at"].notna().any():
-        fig_new = px.bar(
-            run_new,
-            x="run_created_at",
-            y="new_apps",
-            title="New apps per run",
-        )
-        fig_new.update_layout(xaxis_title="Run", yaxis_title="# New apps")
-        col_bar.plotly_chart(fig_new, config={"displayModeBar": False})
-    elif not run_new.empty:
-        fig_new = px.bar(
-            run_new,
-            x="run_id",
-            y="new_apps",
-            title="New apps per run (by run id)",
-        )
-        fig_new.update_layout(xaxis_title="Run ID", yaxis_title="# New apps")
-        col_bar.plotly_chart(fig_new, config={"displayModeBar": False})
-    else:
-        col_bar.info("No run data to display new app counts.")
-
-    top_gain = improve_sort(comparables.dropna(subset=[delta_col]))
-    top_loss = decline_sort(comparables.dropna(subset=[delta_col]))
-
-    movers_cols = ["run_id", "track_id", "name", "run_created_at"]
-    if metric_choice == "Rank position":
-        movers_cols.extend(["best_rank", "prev_rank", "delta_rank"])
-    else:
-        movers_cols.extend(["success_score", "prev_success_score", "delta_success"])
-    movers_cols.append("days_since_prev")
-
-    col_gain, col_loss = st.columns(2)
-    col_gain.markdown(f"**{improve_title}**")
-    col_gain.dataframe(top_gain[movers_cols] if not top_gain.empty else pd.DataFrame(columns=movers_cols), width="stretch", hide_index=True)
-    col_loss.markdown(f"**{decline_title}**")
-    col_loss.dataframe(top_loss[movers_cols] if not top_loss.empty else pd.DataFrame(columns=movers_cols), width="stretch", hide_index=True)
+        fig_runs.update_layout(xaxis_title="Calendar date", yaxis_title=config["run_ylabel"])
+        st.plotly_chart(fig_runs, use_container_width=True, config={"displayModeBar": False})
 
     cat_summary = (
         comparables.dropna(subset=[delta_col])
         .groupby("category", as_index=False)
-        .agg(avg_delta_metric=(delta_col, "mean"), apps=("track_id", "count"))
-        .sort_values("avg_delta_metric", ascending=True if metric_choice == "Rank position" else False)
-        .head(10)
+        .agg(avg_delta=(delta_col, "mean"), apps=("track_id", "count"))
+        .sort_values("avg_delta", ascending=False)
     )
     if not cat_summary.empty:
         fig_cat = px.bar(
-            cat_summary,
+            cat_summary.head(10),
             x="category",
-            y="avg_delta_metric",
+            y="avg_delta",
             text="apps",
-            title=category_title,
+            title=config["category_title"],
         )
-        fig_cat.update_layout(xaxis_title="Category", yaxis_title=run_ylabel)
-        st.plotly_chart(fig_cat, config={"displayModeBar": False})
+        fig_cat.update_layout(xaxis_title="Category", yaxis_title=config["run_ylabel"])
+        st.plotly_chart(fig_cat, use_container_width=True, config={"displayModeBar": False})
 
-    st.markdown("**Raw delta table**")
-    show_columns = [
-        "run_id",
-        "track_id",
-        "name",
-        "run_created_at",
-        "success_score",
-        "prev_success_score",
-        "delta_success",
-        "build_time_estimate",
-        "prev_build_time",
-        "delta_build_time",
-        "average_user_rating",
-        "prev_rating",
-        "delta_rating",
-        "user_rating_count",
-        "prev_rating_count",
-        "delta_rating_count",
-        "days_since_prev",
-        "price",
-        "prev_price",
-        "price_changed",
-        "best_rank",
-        "prev_rank",
-        "delta_rank",
-        "is_new_track",
-    ]
-    available_columns = [col for col in show_columns if col in delta_view.columns]
-    st.dataframe(
-        delta_view[available_columns]
-        .sort_values(["track_id", "run_id"], ascending=[True, False]),
-        width="stretch",
+    col_gain, col_loss = st.columns(2)
+    top_gain = config["improve_sort"](comparables).copy()
+    col_gain.markdown(f"**{config['improve_title']}**")
+    col_gain.dataframe(
+        top_gain[
+            ["run_id", "track_id", "name", "category", delta_col, "average_user_rating", "user_rating_count"]
+        ].rename(columns={delta_col: config["label"]}),
         hide_index=True,
+        use_container_width=True,
     )
+    top_loss = config["decline_sort"](comparables).copy()
+    col_loss.markdown(f"**{config['decline_title']}**")
+    col_loss.dataframe(
+        top_loss[
+            ["run_id", "track_id", "name", "category", delta_col, "average_user_rating", "user_rating_count"]
+        ].rename(columns={delta_col: config["label"]}),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    timeline_df = load_dissatisfied_counts()
+    if not timeline_df.empty:
+        timeline_df["run_date"] = timeline_df["run_created_at"].dt.date
+        timeline_agg = (
+            timeline_df.groupby("run_date", as_index=False)["flagged"].sum().sort_values("run_date")
+        )
+        fig_flagged = px.bar(
+            timeline_agg,
+            x="run_date",
+            y="flagged",
+            title="Flagged dissatisfied apps per run",
+        )
+        fig_flagged.update_layout(xaxis_title="Calendar date", yaxis_title="# dissatisfied apps")
+        st.plotly_chart(fig_flagged, use_container_width=True, config={"displayModeBar": False})
+
+
+def main() -> None:
+    st.set_page_config(page_title="Neon Opportunity Explorer", page_icon="📊", layout="wide")
+    st.title("Neon Opportunity Explorer")
+    st.caption("Clusters derived from Postgres + embeddings.")
+
+    tab_clusters, tab_apps, tab_deltas = st.tabs(["Clusters", "Apps", "Deltas"])
+    with tab_clusters:
+        render_clusters_tab()
+    with tab_apps:
+        render_apps_tab()
+    with tab_deltas:
+        render_deltas_tab()
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ The latest stack focuses on the **v2 snapshot pipeline**, which keeps historical
 - `src/cloud/analysis/`: cloud-ready analysis scripts (`build_deltas_cloud.py`, `generate_embeddings_cloud.py`, `build_neighbors_cloud.py`, `build_clusters_cloud.py`).
 - `src/cloud/scripts/reuse_stage2_scores_cloud.py`: reuse Stage 2 scores in SQLiteCloud.
 - `src/prototype/`: experimental PostgreSQL tooling (Neon schema + migration utilities + Postgres-native scraper).
+- `src/prototype/analysis/`: Neon-native analysis jobs (dissatisfied app selection, embeddings, clustering).
 - `apps/local/`: Streamlit dashboard and visualization entry points for local data (`streamlit_app.py`, `visualize_scores.py`, `visualize_scores_interactive.py`).
 - `apps/cloud/`: Streamlit dashboards for hosted environments (`streamlit_app_cloud.py`, `streamlit_app_neon.py`).
 - `pipelines/local/run_snapshot_refresh.sh`: shell helper for the local pipeline.
@@ -91,6 +92,9 @@ sqlite3 exports/app_store_apps_v2.db "SELECT run_id, COUNT(*) FROM app_snapshots
 
 # Launch Streamlit against production DB
 streamlit run apps/local/streamlit_app.py
+
+# Launch Neon prototype dashboard
+streamlit run apps/cloud/streamlit_app_neon.py
 ```
 
 ## 8. Prototype Postgres (Neon) workflow
@@ -103,6 +107,17 @@ streamlit run apps/local/streamlit_app.py
 - Example local DSN via Neon extension: `postgres://neon:npg@localhost:5432/<database_name>`.
 - Scrape directly into Neon (pulls up to the top 400 apps per category):  
   `python -m src.prototype.app_store_scraper_neon --collection top-free --all-categories --limit 400`
+- Dissatisfied pipeline (no Stage 2 needed):
+  1. Flag unhappy but high-volume apps per category:  
+     `python -m src.prototype.analysis.select_dissatisfied --rating-quantile 0.7 --rating-threshold 3`
+  2. Generate embeddings for flagged apps (or every snapshot via `--all-snapshots`):  
+     `python -m src.prototype.analysis.generate_embeddings_neon --model text-embedding-3-small`
+  3. Cluster them for themes:  
+     `python -m src.prototype.analysis.cluster_dissatisfied --scope-label dissatisfied`
+- General deltas & clustering:  
+  - Rebuild snapshot deltas: `python -m src.prototype.analysis.build_deltas_neon`  
+  - Cluster every embedded snapshot: `python -m src.prototype.analysis.cluster_all --scope-label all`
+- Neon Streamlit app tabs: clusters (with in-cluster opportunity filters and scores), an all-app dropdown, and a deltas view built on `app_snapshot_deltas`.
 
 ---
 This document should be refreshed whenever workflows change (new prediction models, additional tables, etc.).

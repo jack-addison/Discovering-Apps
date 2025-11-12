@@ -151,3 +151,17 @@ CREATE TABLE IF NOT EXISTS app_snapshot_deltas (
 CREATE INDEX IF NOT EXISTS idx_app_deltas_track ON app_snapshot_deltas(track_id);
 CREATE INDEX IF NOT EXISTS idx_app_deltas_run ON app_snapshot_deltas(run_id);
 
+CREATE TABLE IF NOT EXISTS app_snapshot_dissatisfied (
+    run_id INTEGER NOT NULL,
+    track_id BIGINT NOT NULL,
+    category TEXT,
+    price DOUBLE PRECISION,
+    average_user_rating DOUBLE PRECISION,
+    user_rating_count INTEGER,
+    rating_percentile DOUBLE PRECISION,
+    threshold_rating DOUBLE PRECISION,
+    flagged_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (run_id, track_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dissatisfied_run ON app_snapshot_dissatisfied(run_id);
