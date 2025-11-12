@@ -1,0 +1,13 @@
+-- Template pgloader configuration to copy SQLite data into Neon/PostgreSQL.
+-- Replace the placeholders before running: {{SQLITE_PATH}} and {{POSTGRES_DSN}}.
+
+LOAD DATABASE
+     FROM sqlite:///{{SQLITE_PATH}}
+     INTO postgresql://{{POSTGRES_DSN}}
+ WITH include drop,
+      create tables,
+      create indexes,
+      reset sequences
+ SET maintenance_work_mem to '256 MB',
+     work_mem to '64 MB';
+

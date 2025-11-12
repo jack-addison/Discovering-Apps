@@ -1,0 +1,609 @@
+{
+  "metadata": {
+    "db_path": "exports/app_store_apps_v2.db",
+    "model": "gpt-3.5-turbo",
+    "limit": 40
+  },
+  "results": [
+    {
+      "run_id": 2,
+      "track_id": 284447372,
+      "name": "BigTipper™",
+      "existing": {
+        "build_time_weeks": 8.5,
+        "success_score": 65.0,
+        "reasoning": "Moderate complexity with custom UI sliders, photo capture, GPS integration, history, and report generation. Multi-language support adds effort. Low download proxy and modest ratings limit traction despite high rating and top-paid rank #92 in Food & Drink. Developer unknown, so moderate success likelihood."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 78.5,
+        "reasoning": "Assumed moderate complexity due to the need for real-time calculations, photo integration, and report generation. Success score is high due to positive review score, decent number of ratings, and a good chart rank in a competitive category. Missing data on active user base and update frequency could affect success score accuracy."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 284942719,
+      "name": "Universalis",
+      "existing": {
+        "build_time_weeks": 20.0,
+        "success_score": 85.0,
+        "reasoning": "Complex liturgical content, offline access, multi-calendar support, audio subscriptions, and rich UI with widgets and Apple Watch integration require ~20 weeks for a senior team. High rating (4.92), 7.6k ratings, top 5 paid rank in Lifestyle, and established developer indicate strong traction potential."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 85.0,
+        "reasoning": "The app Universalis has a comprehensive set of features including Liturgy of the Hours, Mass readings, additional material, and optional audio add-ons. Building such a feature-rich app with various integrations and content requirements would take significant effort, hence the estimated build time of 12.5 weeks. The app has a high review score, a good number of ratings, and a strong chart rank in its category, indicating a high likelihood of success with a success score of 85.0."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 284942940,
+      "name": "Morse-It",
+      "existing": {
+        "build_time_weeks": 16.5,
+        "success_score": 65.0,
+        "reasoning": "Complex Morse code translation, real-time audio decoding, flashlight control, multiple input modes, social and learning features, plus widget and Siri integration require significant development (~16.5 weeks). Moderate traction from 1090 ratings, 4.7 score, #35 paid rank in Utilities, and niche appeal yield a 65 success likelihood."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 75.0,
+        "reasoning": "The app 'Morse-It' has a comprehensive set of features related to Morse code, including translation, learning, social interactions, and customization. Building such a feature-rich app with multiple integrations and UI depth would require significant development effort, hence the estimated build time of 12.5 weeks. The app has a high review score, a decent number of ratings, and a good chart rank in the Utilities category. However, the success score is slightly lower due to the niche nature of the app and the competitive landscape in the category. The success score is clamped to [0, 100]."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 284962368,
+      "name": "GuitarToolkit - tuner, metronome, chords & scales",
+      "existing": {
+        "build_time_weeks": 20.5,
+        "success_score": 45.0,
+        "reasoning": "Complex app with tuner, metronome, massive chord library (2M+ items), multi-instrument support, and interactive playback requires significant development and content integration, estimated at ~20 weeks. Despite a solid chart rank (#55 paid Music), low rating (1.78) and modest ratings volume (738) indicate limited user satisfaction and traction potential."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 65.0,
+        "reasoning": "The app has a moderate feature complexity with various tools like tuner, metronome, chords, scales & arpeggios. Integrations like chord sheet creation, drum pattern creation, and custom instruments add complexity. The UI depth is significant due to the interactive features. Success score is moderate due to a low review score, average chart rank, and developer reputation. The assumption is made based on missing data like active user base, update frequency, and marketing efforts."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 284979163,
+      "name": "iSilo",
+      "existing": {
+        "build_time_weeks": 14.5,
+        "success_score": 30.0,
+        "reasoning": "The app requires complex document rendering for multiple file types, file management, customizable UI, and local+Wi-Fi+USB transfer, implying moderate to high build complexity. Low rating count (49), mediocre average rating (~3.8), and low chart rank (94) in a competitive Productivity category suggest limited traction potential. Developer reputation unknown, assumed small indie. Build time reflects core MVP without extensive backend cloud features."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 62.5,
+        "reasoning": "The app has a moderate complexity with various document viewing options, file management operations, and customizable features. Integrating additional file types and supporting various actions when tapped would require significant development effort. The success score is moderate due to a decent review score, a reasonable number of ratings, and a top-paid rank in the Productivity category. However, the app's visibility and competitiveness in the category could be improved."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 284980812,
+      "name": "GoSkyWatch Planetarium",
+      "existing": {
+        "build_time_weeks": 20.5,
+        "success_score": 78.0,
+        "reasoning": "Complex AR/gyroscope integration, rich astronomical data, offline functionality, and polished UI require ~20 weeks for a senior team MVP. Strong user ratings (4.78), 10k+ reviews, and top-20 paid rank in Navigation indicate solid traction potential. Developer reputation unknown, assumed moderate."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 85.0,
+        "reasoning": "Assumed moderate complexity due to the extensive feature set and integrations. Success score is high based on positive reviews, high rating average, and consistent chart rank in a competitive category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 285668269,
+      "name": "KickMap NYC",
+      "existing": {
+        "build_time_weeks": 16.5,
+        "success_score": 65.0,
+        "reasoning": "MVP requires complex offline maps, real-time MTA alerts, GPS integration, and a polished UI, demanding ~16.5 weeks for a senior team. Moderate traction indicated by 434 ratings, high 4.76 score, and #67 top-paid rank in a competitive Navigation category. Developer reputation unknown, so score is moderate."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 76.5,
+        "reasoning": "Assumed moderate complexity for the app features and UI depth. Success score is high due to positive reviews, decent number of ratings, and a good chart rank in a competitive category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 285877935,
+      "name": "QuickVoice2Text Email (PRO Recorder)",
+      "existing": {
+        "build_time_weeks": 12.5,
+        "success_score": 30.0,
+        "reasoning": "App requires complex voice-to-text integration, multi-language support, audio recording, syncing, and companion desktop app, increasing build time. Despite 8M total downloads claimed, current app has low ratings (2.6/5) and few recent downloads (171), limiting traction. Moderate chart rank (54) in Business paid category offers slight boost."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 45.5,
+        "reasoning": "The app has a moderate complexity with various features like voice-to-text, email integration, ringtone recording, and desktop companion app. Given the app's low review score, limited number of ratings, and average chart rank in a competitive category, the success score is relatively low. The success score is conservative due to missing data on user engagement metrics and developer reputation."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 286215117,
+      "name": "Clinometer + bubble level",
+      "existing": {
+        "build_time_weeks": 8.5,
+        "success_score": 45.0,
+        "reasoning": "The app has moderate complexity with multiple sensor integrations, calibration modes, speech synthesis, and peer device communication, requiring ~8.5 weeks for a senior team MVP. Market traction is limited by low ratings (41), modest average score (~4), niche utility category, and low downloads despite a top-paid rank of 88, indicating moderate but limited commercial appeal."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 67.5,
+        "reasoning": "The app has a moderate number of features and integrations, which would require significant development time. The success score is based on the app's decent review score, developer reputation, and category competitiveness. However, the limited number of ratings and moderate chart rank slightly lower the success score."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 286574416,
+      "name": "iBartender Cocktail Recipes",
+      "existing": {
+        "build_time_weeks": 14.5,
+        "success_score": 35.0,
+        "reasoning": "App requires complex features: cloud backup, custom recipes with images, PDF generation, inventory/shopping list logic, and device shake gesture, plus a rich UI. Backend built from scratch adds time. Low ratings (1) and downloads, niche category, and low developer visibility limit traction despite top-paid rank of 68."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 20,
+        "reasoning": "The app has a low number of ratings and downloads, which may indicate limited user engagement. The app's description suggests a moderate level of complexity in terms of features and integrations, leading to an estimated build time of around 12.5 weeks."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 286799607,
+      "name": "Cleartune",
+      "existing": {
+        "build_time_weeks": 10.5,
+        "success_score": 65.0,
+        "reasoning": "The app requires precise audio processing, real-time pitch detection, and a sophisticated UI with custom temperaments and tuning options, demanding moderate complexity and testing. With 858 ratings, a 3.7 score, and a top 12 paid rank in Music, it shows niche but solid traction. Developer reputation is unknown, so success is moderate."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 65.0,
+        "reasoning": "The app Cleartune is in the Music category with a decent review score and a moderate number of ratings. It has a good ranking in the top-paid chart for its category. The app's developer has some reputation and the app has been featured in various music-related publications. However, the app's success score is lower due to the competitive nature of the music category and the limited information available about its downloads and overall market penetration. The build time estimate is higher due to the complexity of the app's features, including the unique note wheel interface, support for various instruments, custom temperaments, and transpositions."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 286892932,
+      "name": "Mocha Telnet",
+      "existing": {
+        "build_time_weeks": 10.5,
+        "success_score": 25.0,
+        "reasoning": "The app requires complex terminal emulation, multiple barcode scanner integrations, and SSH/Telnet protocols, increasing build time. Low ratings (3.33), few reviews (6), minimal downloads proxy (6), and a modest chart rank (64) in a competitive Business category limit traction potential."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 45.0,
+        "reasoning": "The app has a low number of ratings and a moderate review score. The category is competitive, and the app is not highly ranked in the top-paid chart. The app description indicates a moderate level of complexity in terms of features and integrations."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 287217531,
+      "name": "FAAwait",
+      "existing": {
+        "build_time_weeks": 6.5,
+        "success_score": 45.0,
+        "reasoning": "MVP requires real-time FAA data integration and a clean UI for airport delay info, moderate complexity. Low rating count (32) and downloads limit traction confidence despite decent rating (4.06) and top-paid rank (57) in Travel. Single language and indie developer reduce reach."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 6.5,
+        "success_score": 72.5,
+        "reasoning": "Assumed moderate complexity due to real-time data integration and UI depth. Success score is based on a decent review score, moderate number of ratings, and a top-paid rank in a competitive category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 287316432,
+      "name": "AyeTides",
+      "existing": {
+        "build_time_weeks": 14.5,
+        "success_score": 75.0,
+        "reasoning": "App requires complex offline tide data for 13,400+ locations, interactive graphs, maps, and multi-language support, implying moderate-high build effort. Strong rating (4.82) with ~4.9k ratings and top-30 paid rank in Navigation indicates solid niche traction. Developer reputation unknown, assumed moderate."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 82.5,
+        "reasoning": "The app has a solid review score and a good number of ratings, indicating user satisfaction. It is ranked in the top-paid category for Navigation, which suggests a competitive position. However, the app description mentions a wide range of features and locations, implying a complex build effort. The lack of specific information on integrations and UI depth leads to a conservative estimate."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 287909017,
+      "name": "GPS Kit - Offline GPS Tracker",
+      "existing": {
+        "build_time_weeks": 16.5,
+        "success_score": 62.5,
+        "reasoning": "Complex offline GPS features, multiple map sources, sensor integrations, data import/export, and customizable UI justify ~16.5 weeks for a senior team. Moderate rating (4.21) with 349 reviews and rank 56 in paid Navigation indicates niche but steady traction. Developer reputation unknown, assumed moderate."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 75,
+        "reasoning": "The app 'GPS Kit - Offline GPS Tracker' in the Navigation category by Garafa, LLC has a moderate complexity with advanced GPS functionalities and offline mapping. Given the feature set and integrations, building the app is estimated to take around 12.5 weeks. The app has a decent review score, a good number of ratings, and a stable rank in the top-paid Navigation category. However, the success score is clamped at 75 due to the limited review volume and potential competition in the navigation app market."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 288013812,
+      "name": "TimeScroller - timezone helper",
+      "existing": {
+        "build_time_weeks": 8.5,
+        "success_score": 55.0,
+        "reasoning": "MVP requires complex timezone logic, daylight saving rules, UI for multi-city display, drag interactions, calendar/email integration, and offline DB of 20k+ cities, estimating ~8.5 weeks. Moderate traction: high rating (4.96) but low ratings/downloads (24), niche business category, and #26 top-paid rank suggest modest market interest."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 75,
+        "reasoning": "The app has a moderate level of complexity with features like multi-time zone clock, meeting planner, and automatic suggestion of suitable times. The UI depth seems significant with various color-coded icons and city selections. Integrations like calendar events and email drafting add to the complexity. The success score is relatively high due to the good review score, developer reputation, and decent chart rank. However, the number of ratings is low, which could impact the success score. Assumed a moderate build time due to the feature set and UI complexity."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 288362053,
+      "name": "Remote Desktop - RDP",
+      "existing": {
+        "build_time_weeks": 14.5,
+        "success_score": 30.0,
+        "reasoning": "Building a full-featured RDP client with protocol licensing, hardware mouse support, WOL, printing, and barcode scanning is complex, requiring ~14.5 weeks for a senior team. Low ratings (3.3), few reviews (22), low downloads, and modest chart rank (80) limit traction despite niche business category."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 65.0,
+        "reasoning": "The app's feature set, including RDP protocol support, mouse interactions, printing, and barcode scanning, suggests moderate complexity. Integrations like Wake on LAN and Bluetooth mouse support add to the development time. The app's review score and number of ratings are low, indicating limited user feedback. The app's category competitiveness and average chart rank contribute to a moderate success score."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 288419283,
+      "name": "RadarScope",
+      "existing": {
+        "build_time_weeks": 28.0,
+        "success_score": 85.0,
+        "reasoning": "Complex radar visualization with real-time data, multiple integrations (AllisonHouse, Spotter Network, mPING), multi-platform support, and advanced weather analytics require extensive development (~28 weeks). Strong market traction indicated by #1 paid Weather app rank, 2541 ratings at 4.19 avg, and established developer. Niche but highly valued by professionals and enthusiasts."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 20,
+        "success_score": 85,
+        "reasoning": "The RadarScope app is complex with multiple subscription tiers, integrations, and a wide range of features. Building such a feature-rich app would require significant development time. The app has a high review score, a good number of ratings, and ranks well in the Weather category, indicating a strong user base and positive reception. However, the app's success score is slightly reduced due to the competitive nature of the Weather category and the high price point of the app."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 288420737,
+      "name": "Tide Graph",
+      "existing": {
+        "build_time_weeks": 8.5,
+        "success_score": 65.0,
+        "reasoning": "Moderate complexity with tide prediction algorithms, GPS integration, and interactive graphs. Requires backend for data updates. Good rating (4.75) and solid rating volume (1460) with a top-50 paid rank in Navigation indicate decent niche traction. Limited language and downloads cap broader appeal."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 78.5,
+        "reasoning": "Assumed moderate complexity due to integration with coastal stations data, graph visualization, and location services. Success score is high due to positive review score, decent number of ratings, and top 50 rank in the Navigation category. Missing data on competition and developer reputation could impact success score."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 289170101,
+      "name": "Name-days",
+      "existing": {
+        "build_time_weeks": 8.5,
+        "success_score": 15.0,
+        "reasoning": "Moderate complexity due to contacts integration, notifications, multi-country data, and Wikipedia browsing. Small senior team can build MVP in ~8.5 weeks. Low success likelihood given very poor rating (1.8), minimal ratings (10), low downloads proxy (10), and low chart rank (100) in a competitive Social Networking category."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 5.0,
+        "reasoning": "The app has a low review score and a small number of ratings, indicating potential issues with user satisfaction. The app's category, 'Social Networking,' is highly competitive, which may impact its success score. The build time estimate is moderate due to the extensive features, multiple language support, and potential integrations with external sources like Wikipedia."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 289616509,
+      "name": "Mobile Mouse",
+      "existing": {
+        "build_time_weeks": 20.5,
+        "success_score": 75.0,
+        "reasoning": "Complex multi-platform remote control app with real-time input, motion sensing, Apple Watch integration, media controls, encryption, and server software. High UI complexity and numerous integrations increase build time. Strong rating (4.54) with 2476 reviews and top-paid rank 66 in Utilities indicates moderate market traction. Developer reputation unknown, assumed moderate."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 78.5,
+        "reasoning": "Assumed moderate complexity due to extensive features and integrations. Success score is high due to positive review score, decent number of ratings, and top chart ranking in the Utilities category. However, lack of information on update frequency and developer reputation may impact success score."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 289894882,
+      "name": "White Noise",
+      "existing": {
+        "build_time_weeks": 16.5,
+        "success_score": 85.0,
+        "reasoning": "The app requires complex audio processing, a large sound catalog, advanced mixing features, multi-device support (Apple TV, Watch), and a marketplace for user-generated content, implying significant build effort (~16.5 weeks). High rating (4.84), strong review volume (~44K), top 3 paid rank in Health & Fitness, and developer reputation support a high success likelihood (85). Assumed backend and marketplace infrastructure from scratch."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 16.5,
+        "success_score": 87.5,
+        "reasoning": "The app 'White Noise' by TMSOFT in the Health & Fitness category has a solid review score of 4.84 from 43,993 ratings and ranks 3rd in the top-paid chart for Health & Fitness. The app offers a wide range of features and content, including a variety of sounds, alarm options, and customization features. Given the complexity of features, integrations with Apple TV and Apple Watch, and the need for a polished UI, the estimated build time is 16.5 weeks. The success score is high due to positive reviews, developer reputation, and category competitiveness, but could be impacted by the competitive nature of the Health & Fitness category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 292148184,
+      "name": "NOAA Buoy and Tide Data",
+      "existing": {
+        "build_time_weeks": 10.5,
+        "success_score": 45.0,
+        "reasoning": "Moderate complexity integrating NOAA APIs, GPS, maps, and real-time data with a detailed UI. Small user base (32 downloads/ratings), average rating (3.9), and niche Weather category reduce traction. Top-paid rank 13 in Weather helps but limited language and modest developer visibility lower success likelihood."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 65,
+        "reasoning": "Assumed moderate complexity due to integration with NOAA's National Data Buoy Center, tide predictions, and moon phase information. Limited success score due to low review volume, average rating, and moderate category competitiveness."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 292410356,
+      "name": "NewsTap (Usenet Newsreader)",
+      "existing": {
+        "build_time_weeks": 14.5,
+        "success_score": 22.0,
+        "reasoning": "Complex UI with threaded discussions, offline sync via multiple protocols, binary content handling, and multi-mode layouts require significant effort (~14.5 weeks). Low ratings (3.375), very few downloads/ratings (16), niche Usenet focus, and modest top-paid rank (29) limit traction to ~22. Developer is individual, suggesting limited marketing."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 45.0,
+        "reasoning": "The app has a moderate feature complexity with offline usage optimization, news group management, binary group support, article layout optimization, and sync features. Building these features could take some time. The app has a low number of ratings and a moderate review score, indicating limited user feedback. It ranks decently in the 'News' category but faces competition. The success score is conservative due to limited user feedback and category competitiveness."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 292628469,
+      "name": "Juxtaposer: cut, combine, edit",
+      "existing": {
+        "build_time_weeks": 16.5,
+        "success_score": 72.0,
+        "reasoning": "Complex photo editing with ML-powered Magic Crop, multi-source image loading (Unsplash, Dropbox, Flickr), advanced blend modes, and high-res export require significant UI and backend work, estimated at ~16.5 weeks. Strong user ratings (4.9/5) with 10k+ reviews and top-30 paid rank in a competitive Photo & Video category indicate good traction potential. Developer reputation unknown, so score is moderate-high."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 85.0,
+        "reasoning": "Assumed moderate complexity due to advanced photo editing features. Success score is high based on positive reviews, high rating average, and decent chart rank in a competitive category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 292775676,
+      "name": "Compoundee",
+      "existing": {
+        "build_time_weeks": 8.5,
+        "success_score": 55.0,
+        "reasoning": "The app requires complex financial calculations, multiple input options, offline guide, email integration, Touch ID, and iPad support, leading to moderate build time (~8.5 weeks). With only 125 downloads/ratings but excellent rating (4.97) and a #62 paid rank in Finance, traction is moderate. Developer reputation unknown, and Finance is competitive."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 82.5,
+        "reasoning": "Assumed moderate complexity due to financial calculations and UI depth. Success score is high due to positive reviews, decent number of ratings, and good chart rank. Missing data on specific integrations and developer reputation."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 293300744,
+      "name": "Congress Pro",
+      "existing": {
+        "build_time_weeks": 16.5,
+        "success_score": 45.0,
+        "reasoning": "Complex features include detailed member/committee data, AI summaries, note-taking, Apple Watch support, subscription model, and frequent updates, requiring ~16.5 weeks for a senior team. Low rating count (21), modest rank (78 paid Reference), and niche category limit traction despite strong content and developer history."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 65,
+        "reasoning": "The app has a moderate level of complexity with features like member pages, committees, legislation tracking, notes, widgets, and Apple Watch integration. Considering the depth of content and potential integrations, a conservative estimate of 12.5 weeks for build time is provided. The success score is based on the app's review score, number of ratings, chart rank, and developer reputation. The limited number of ratings and moderate review score contribute to a moderate success score of 65."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 293656711,
+      "name": "Perfect OB Wheel",
+      "existing": {
+        "build_time_weeks": 6.5,
+        "success_score": 75.0,
+        "reasoning": "The app requires moderate complexity with date calculations, multiple input methods, persistence, and optional in-app purchase features. The UI is specialized but not highly complex. With 3.4k ratings at 4.9 stars and a top-50 paid rank in Medical, traction is solid but niche. Developer is a medical professional, enhancing credibility."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 85.0,
+        "reasoning": "Assumed moderate complexity due to the need for accurate gestational calculations and various input methods. Success score is high due to positive reviews, high rating average, and decent chart rank in a competitive medical category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 293670532,
+      "name": "Savings Calculator",
+      "existing": {
+        "build_time_weeks": 3.5,
+        "success_score": 15.0,
+        "reasoning": "Simple calculator with basic UI and no backend complexity; estimated 3-4 weeks for MVP. Very low traction due to poor rating (2.5), minimal reviews (2), low downloads proxy (2), and low chart rank (76) in a competitive Finance category. Developer unknown."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 6.5,
+        "success_score": 5.0,
+        "reasoning": "The app has a low review score and a very small number of ratings, indicating low user engagement. The app is in a competitive category, which may make it challenging to gain visibility and downloads. Due to the simple functionality described in the app's description, the estimated build time is relatively low."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 293760823,
+      "name": "iFart - Fart Sounds App",
+      "existing": {
+        "build_time_weeks": 6.5,
+        "success_score": 75.0,
+        "reasoning": "Core features like sound playback, recording, playlists, and timers are moderate complexity, requiring custom UI and audio handling. Multiple fart packs add content but are manageable. The app has historical brand recognition, decent ratings (4.47) with ~700 reviews, and a top 100 paid rank in Entertainment, indicating moderate traction potential despite niche appeal."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 65,
+        "reasoning": "The app has a relatively simple UI and features, but the integration of various fart sounds and recording functionalities may require some development effort. The app has a decent review score and number of ratings, but the category is highly competitive and the app's concept may limit its broader appeal, leading to a moderate success score."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 293798497,
+      "name": "WalkieTalkie VOIP",
+      "existing": {
+        "build_time_weeks": 14.5,
+        "success_score": 35.0,
+        "reasoning": "Real-time full-duplex VOIP with peer-to-peer, cross-platform support, dynamic buddy lists, and conference mode requires complex networking and UI, estimating ~14.5 weeks for MVP. Low rating count (4), modest chart rank (72 paid social), and unknown dev reputation limit traction confidence to 35."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 65.0,
+        "reasoning": "The app has a low number of ratings (4) which may indicate limited user adoption. However, it has a high review score (5.0) and a decent chart rank (72 in Social Networking). The app's description highlights unique features like peer-to-peer calling and low latency, which could attract users. The success score is moderate due to the lack of significant user base and competitive category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 294047845,
+      "name": "Mappity Quakes",
+      "existing": {
+        "build_time_weeks": 6.5,
+        "success_score": 55.0,
+        "reasoning": "MVP requires map integration, real-time earthquake data ingestion, and multi-language support, adding moderate complexity. With 317 ratings and a strong 4.78 score, plus a top 30 paid News rank, traction potential is moderate. Developer reputation unknown, so scored conservatively."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 72.5,
+        "reasoning": "The app has a good review score and a decent number of ratings, indicating user satisfaction. However, the category 'News' is highly competitive, which may impact success. The app's features like map view and earthquake data integration could add complexity to development, hence the estimated build time. Missing data on specific integrations or advanced functionalities may affect the accuracy of these estimates."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 294631159,
+      "name": "WeatherPro",
+      "existing": {
+        "build_time_weeks": 28.5,
+        "success_score": 78.0,
+        "reasoning": "Complex MVP with global weather data, real-time updates, Apple Watch and Netatmo integrations, satellite/radar maps, and multi-language support requires extensive backend and UI work, estimated ~28.5 weeks. Strong rating (4.68) and 3.7k ratings with #28 top-paid rank in Weather category indicate good traction potential. Developer reputation unknown, so score is moderately high but not maximal."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 78.5,
+        "reasoning": "Assumed moderate complexity for the app due to the extensive features and integrations. Success score is high considering the positive review score, decent number of ratings, and top chart ranking in the Weather category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 294730339,
+      "name": "TripView",
+      "existing": {
+        "build_time_weeks": 16.5,
+        "success_score": 72.0,
+        "reasoning": "The app requires complex offline timetable storage, real-time delay integration, interactive maps, multi-modal trip editing, and Apple Watch + Siri Shortcuts support, demanding ~16.5 weeks for a senior team. With 1267 ratings at 4.78, a paid price, and rank 58 in Travel top-paid, traction is moderate but niche. Developer reputation unknown, assumed moderate."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 78.5,
+        "reasoning": "Assumed moderate complexity due to real-time data integration and interactive features. Success score is high due to positive reviews, decent number of ratings, and top chart ranking in a competitive category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 294934058,
+      "name": "HotSchedules",
+      "existing": {
+        "build_time_weeks": 20.5,
+        "success_score": 85.0,
+        "reasoning": "Complex scheduling, real-time shift swaps, calendar sync, messaging, and manager dashboards require significant UI and backend integration, estimated at ~20 weeks for a senior team. High rating (4.6), large review volume (67k), #1 paid in Business, and established developer indicate strong traction potential."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 12.5,
+        "success_score": 85.0,
+        "reasoning": "Assumed moderate complexity due to scheduling features and communication functionalities. Success score is high due to positive review score, high number of ratings, top rank in the Business category, and established developer reputation. However, the success score could be impacted by the niche target audience and the requirement of a HotSchedules user account."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 294937581,
+      "name": "Sun n Moon",
+      "existing": {
+        "build_time_weeks": 10.5,
+        "success_score": 40.0,
+        "reasoning": "App requires complex astronomical calculations, multiple location inputs, offline capability, and a custom compass UI with animations, justifying ~10.5 weeks for MVP by a senior team. Low downloads (8), few ratings (8) despite perfect score, and low paid rank (83) in a competitive Weather category limit traction to 40."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 75,
+        "reasoning": "The app 'Sun n Moon' in the Weather category has a moderate complexity with features like sunrise/sunset calculations, moon phases animation, and location-based services. Considering the integration with Apple Watch and the detailed functionality, the build time is estimated to be around 8.5 weeks. The success score of 75 is based on the high review score, limited number of ratings, decent chart rank, and the niche category competitiveness. However, the success score is slightly lower due to the low number of ratings and the app's visibility in the top-paid Weather category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 295759189,
+      "name": "Big Day - Event Countdown",
+      "existing": {
+        "build_time_weeks": 6.5,
+        "success_score": 55.0,
+        "reasoning": "The app requires moderate UI complexity with animated widgets, photo integration, notifications, and social sharing, plus backend for event storage. The developer is independent with low downloads (58) but decent rating (4.19) and a top-paid rank (#22) in Lifestyle, indicating niche appeal but limited traction so far."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 65.0,
+        "reasoning": "The app has a moderate feature set with widgets, customization options, and social sharing. Building these features along with UI enhancements could take around 8.5 weeks. The app has a decent review score and a top-paid rank in the Lifestyle category, but the number of ratings is relatively low. The success score is adjusted to 65 due to the limited review volume."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 295775656,
+      "name": "12 Steps Companion AA Big Book",
+      "existing": {
+        "build_time_weeks": 14.5,
+        "success_score": 65.0,
+        "reasoning": "The app has moderate UI complexity with extensive reading, search, notes, contacts, and sobriety calculator features requiring custom UI and offline content management. Backend likely minimal but some integration for contacts and sharing. Moderate content volume with copyright constraints. The app ranks #14 top-paid in Lifestyle with 136 ratings at 4.47 stars, indicating niche but engaged audience. Developer is independent, limiting marketing reach. Overall, moderate build effort and fair traction in a competitive category."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 75,
+        "reasoning": "Assumed moderate complexity due to the comprehensive features described. Success score is high based on positive review score, decent number of ratings, and top 20 rank in the Lifestyle category. Missing data on developer reputation and specific integrations."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 295952485,
+      "name": "VAT Calculator",
+      "existing": {
+        "build_time_weeks": 3.0,
+        "success_score": 20.0,
+        "reasoning": "Simple VAT calculator with predefined and custom rates requires minimal UI and no backend, estimated 3 weeks. Very low downloads and ratings (1 each), niche utility, low chart rank (67 in paid Shopping), and unknown developer reputation limit traction potential."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 4.5,
+        "success_score": 20.0,
+        "reasoning": "The app is relatively simple in terms of features and integrations, but may require some effort in UI design. The success score is low due to the app having only 1 review, limited downloads, and a low chart rank. The lack of review volume and downloads indicate low user engagement and potential competitiveness issues in the Shopping category."
+      }
+    },
+    {
+      "run_id": 2,
+      "track_id": 296290510,
+      "name": "Big Words",
+      "existing": {
+        "build_time_weeks": 6.5,
+        "success_score": 35.0,
+        "reasoning": "App has moderate UI complexity with Apple Watch sync and multi-language support, requiring ~6.5 weeks for MVP by a senior team. Low rating (3.38) and few reviews (29) limit traction despite a decent paid rank (21) in Social Networking. Developer reputation unknown, downloads very low, indicating niche appeal."
+      },
+      "cheaper_model_result": {
+        "build_time_weeks": 8.5,
+        "success_score": 45.0,
+        "reasoning": "The app 'Big Words' has a relatively simple feature set with basic functionalities like swiping, rotating, and syncing to Apple Watch. However, the app's description indicates a loyal user base but limited reach. The app's review score is average, and the number of ratings is low, suggesting moderate success potential. The app's category, 'Social Networking,' is highly competitive, which may impact its success score. Due to the limited information available, a conservative estimate is provided."
+      }
+    }
+  ]
+}

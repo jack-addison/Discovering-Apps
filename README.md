@@ -24,51 +24,49 @@ pip install -r requirements.txt
 - OpenAI API key (only required for Stage 2 scoring)
 
 ### Repository layout
-- `app_store_scraper.py` – Stage 1 scraper pulling App Store metadata (latest snapshot only).
-- `app_store_scraper_v2.py` – Enhanced scraper that records historical snapshots and richer metadata.
-- `app_stage2_analysis.py` – Stage 2 LLM scoring script that enriches the database.
-- `visualize_scores.py` – Static PNG scatter plot generator.
-- `visualize_scores_interactive.py` – Plotly HTML preview with quick-win filters.
-- `streamlit_app.py` – Streamlit dashboard for interactive exploration (scatter views, quick-win leaderboard, revamped opportunity finder).
-- `streamlit_app_cloud.py` – Streamlit dashboard variant pointing at the hosted SQLiteCloud database.
-- `app_store_scraper_v2_cloud.py` – Cloud-connected Stage 1 scraper (writes snapshots to SQLiteCloud).
-- `app_stage2_analysis_cloud.py` – Stage 2 scoring script targeting SQLiteCloud.
-- `scripts/reuse_stage2_scores_cloud.py` – Reuses Stage 2 scores in SQLiteCloud when metadata is unchanged.
-- `analysis/generate_embeddings_cloud.py` – Generates embeddings directly in SQLiteCloud.
-- `analysis/build_neighbors_cloud.py` – Computes similarity neighbours for the cloud DB.
-- `analysis/build_clusters_cloud.py` – Builds keyword-labelled clusters in SQLiteCloud.
-- `analysis/build_deltas_cloud.py` – Refreshes the `app_snapshot_deltas` table in SQLiteCloud.
-- `run_cloud_pipeline_cloud.sh` – Convenience script that runs the entire cloud pipeline end-to-end.
-- `analysis/generate_embeddings.py` – Creates text embeddings for app snapshots to power similarity analysis.
-- `analysis/build_neighbors.py` – Converts stored embeddings into nearest-neighbour tables for quick “similar apps” lookups.
-- `analysis/build_clusters.py` – Groups embeddings into keyword-labelled clusters for the dashboard.
-- `exports/app_store_apps.db` – Sample SQLite database populated via the scraper.
+- `src/local/stage1/app_store_scraper.py` – Stage 1 scraper pulling App Store metadata (latest snapshot only).
+- `src/local/stage1/app_store_scraper_v2.py` – Snapshot-aware Stage 1 scraper capturing historical runs and richer metadata.
+- `src/local/stage2/app_stage2_analysis.py` – Stage 2 LLM scoring script that enriches the local SQLite database.
+- `src/local/analysis/` – Local analysis utilities (`build_deltas.py`, `generate_embeddings.py`, `build_neighbors.py`, `build_clusters.py`).
+- `src/local/scripts/reuse_stage2_scores.py` – Reuses Stage 2 scores when metadata is unchanged.
+- `src/cloud/stage1/app_store_scraper_v2_cloud.py` – Cloud-connected Stage 1 scraper (writes snapshots to SQLiteCloud).
+- `src/cloud/stage2/app_stage2_analysis_cloud.py` – Stage 2 scoring script targeting SQLiteCloud.
+- `src/cloud/analysis/` – Cloud variants of the analysis pipelines (deltas, embeddings, neighbours, clusters).
+- `src/cloud/scripts/reuse_stage2_scores_cloud.py` – Reuse logic for Stage 2 scores in SQLiteCloud.
+- `src/prototype/` – Experimental PostgreSQL tooling (Neon schema, migration scripts, Postgres-native scraper).
+- `apps/local/` – Visualization entry points for local data (`streamlit_app.py`, `visualize_scores.py`, `visualize_scores_interactive.py`).
+- `apps/cloud/` – Cloud Streamlit dashboards (`streamlit_app_cloud.py`, `streamlit_app_neon.py`).
+- `pipelines/local/run_snapshot_refresh.sh` – Local cron-friendly pipeline runner.
+- `pipelines/cloud/run_cloud_pipeline.sh` – Cloud ingestion & analysis orchestrator.
+- `config/cloud.py` – SQLiteCloud connection details and helper.
+- `artifacts/experiments/` – Sample outputs from experiment scripts.
+- `exports/app_store_apps.db` / `exports/app_store_apps_v2.db` – Sample SQLite databases populated via the scrapers.
 - `requirements.txt` – Python dependencies.
 - `visualizations/` – Generated charts (PNG/HTML).
 
 Run a keyword scrape:
 
 ```bash
-python app_store_scraper.py --search-term "productivity" --limit 25
+python -m src.local.stage1.app_store_scraper --search-term "productivity" --limit 25
 ```
 
 Gather a chart:
 
 ```bash
-python app_store_scraper.py --collection top-free --country us --limit 50
+python -m src.local.stage1.app_store_scraper --collection top-free --country us --limit 50
 ```
 
 Harvest the top 100 apps for every category (default limit is 100):
 
 ```bash
-python app_store_scraper.py --collection top-free --all-categories
+python -m src.local.stage1.app_store_scraper --collection top-free --all-categories
 ```
 
 ### Snapshot-aware scraper (Stage 1b)
 Use the v2 script when you want to keep historical runs and additional metadata (release dates, version info, price tier, screenshots, etc.). Each invocation writes to `exports/app_store_apps_v2.db` by default and records a new entry in `scrape_runs`, `app_snapshots`, and `app_rankings`.
 
 ```bash
-python app_store_scraper_v2.py \
+python -m src.local.stage1.app_store_scraper_v2 \
   --collection top-free \
   --all-categories \
   --country us \
@@ -96,7 +94,7 @@ Use the Stage 2 script to enrich the snapshot database with estimated build time
 
 ```bash
 export OPENAI_API_KEY=sk-...
-python app_stage2_analysis.py --run-id 5 --run-id 6
+python -m src.local.stage2.app_stage2_analysis --run-id 5 --run-id 6
 ```
 
 ### Getting an OpenAI API key
@@ -108,25 +106,25 @@ python app_stage2_analysis.py --run-id 5 --run-id 6
 - **macOS/Linux (bash/zsh)**  
   ```bash
   export OPENAI_API_KEY="sk-your-key"
-  python app_stage2_analysis.py
+  python -m src.local.stage2.app_stage2_analysis
   ```
 - **macOS/Linux (Fish shell)**  
   ```fish
   set -x OPENAI_API_KEY "sk-your-key"
-  python app_stage2_analysis.py
+  python -m src.local.stage2.app_stage2_analysis
   ```
 - **Windows PowerShell**  
   ```powershell
   setx OPENAI_API_KEY "sk-your-key"
   # restart your shell, then:
-  python app_stage2_analysis.py
+  python -m src.local.stage2.app_stage2_analysis
   ```
 - **Windows CMD (temporary for session)**  
   ```cmd
   set OPENAI_API_KEY=sk-your-key
-  python app_stage2_analysis.py
+  python -m src.local.stage2.app_stage2_analysis
   ```
-- For reusable workflows, place the export in your shell profile or use a local `.env` file with a loader (e.g., `python -m dotenv run -- app_stage2_analysis.py`), but keep that file out of version control.
+- For reusable workflows, place the export in your shell profile or use a local `.env` file with a loader (e.g., `python -m dotenv run -- python -m src.local.stage2.app_stage2_analysis`), but keep that file out of version control.
 
 Key notes:
 - Targets `exports/app_store_apps_v2.db` by default (override with `--db-path`). Use one or more `--run-id` arguments to limit which scrape snapshots are scored.
@@ -141,16 +139,17 @@ Key notes:
 - **Reasoning string**: Each response includes a short justification for GPT’s numbers. We store only the numeric fields in SQLite, but the reasoning is logged for debugging.
 - **Quick-win definition**: Throughout the tooling, “quick wins” refers to `build_time_estimate ≤ 12` and `success_score ≥ 70`. This threshold powers the shading in the plots and the leaderboard filters.
 
-- **Batch experiment**: `python experiments/batch_stage2_experiment.py` tests grouping apps (default 20 at a time, first 40 snapshots) and writes the raw model responses to `experiments/batch_stage2_results.json` for comparison without touching the database.
-- **Cheaper-model experiment**: `python experiments/cheaper_model_experiment.py` re-scores the first 40 snapshots with a cheaper model (default `gpt-3.5-turbo`) and stores results in `experiments/cheaper_model_results.json` for side-by-side comparison.
-- **Feature extraction**: `python analysis/build_deltas.py` materialises per-app snapshot deltas (e.g., success/rating/rank changes) into the `app_snapshot_deltas` table inside `exports/app_store_apps_v2.db`.
+- **Batch experiment**: `python -m src.local.experiments.batch_stage2_experiment` tests grouping apps (default 20 at a time, first 40 snapshots) and writes the raw model responses to `artifacts/experiments/batch_stage2_results.json` for comparison without touching the database.
+- **Cheaper-model experiment**: `python -m src.local.experiments.cheaper_model_experiment` re-scores the first 40 snapshots with a cheaper model (default `gpt-3.5-turbo`) and stores results in `artifacts/experiments/cheaper_model_results.json` for side-by-side comparison.
+- **Feature extraction**: `python -m src.local.analysis.build_deltas` materialises per-app snapshot deltas (e.g., success/rating/rank changes) into the `app_snapshot_deltas` table inside `exports/app_store_apps_v2.db`.
 
 ## Stage 3: Visualising Outcomes
 
-- Static preview: `python visualize_scores.py` renders `visualizations/success_vs_build_time.png`.
-- Interactive dashboard: `python visualize_scores_interactive.py --open` writes an HTML scatter plot to `visualizations/success_vs_build_time.html` and opens it in your browser. Categories are split into free/paid variants, and you can use flags such as `--min-ratings 500`, `--max-build-time 16`, `--min-success 70`, or `--quick-wins-only` to focus on specific cohorts.
-- Streamlit app: `streamlit run streamlit_app.py` launches an interactive workspace with filter controls (category, price tier, scrape run selection, rating volume, build time, success score, quick wins toggle), configurable 2D/3D scatter plots (choose axes, colour, bubble size), category summary bars, distribution box plots, a quick-win leaderboard, a similarity cluster explorer, and a revamped Opportunity Finder. The latter now exposes demand dissatisfaction (raw and percentile scores), execution floor controls (success score or success-per-week), cohort metric cards, concise result tables with expandable snapshots, embedded “similar apps” suggestions, and per-category standouts. The sidebar can be widened by tweaking the injected CSS in `streamlit_app.py`.
-- Hosted demo: visit [discovering-apps-jack.streamlit.app](https://discovering-apps-jack.streamlit.app) (cloud-backed) to explore the dashboard without running it locally. The hosted instance uses `streamlit_app_cloud.py`, which reads from the remote SQLiteCloud database.
+- Static preview: `python -m apps.local.visualize_scores` renders `visualizations/success_vs_build_time.png`.
+- Interactive dashboard: `python -m apps.local.visualize_scores_interactive --open` writes an HTML scatter plot to `visualizations/success_vs_build_time.html` and opens it in your browser. Categories are split into free/paid variants, and you can use flags such as `--min-ratings 500`, `--max-build-time 16`, `--min-success 70`, or `--quick-wins-only` to focus on specific cohorts.
+- Streamlit app: `streamlit run apps/local/streamlit_app.py` launches an interactive workspace with filter controls (category, price tier, scrape run selection, rating volume, build time, success score, quick wins toggle), configurable 2D/3D scatter plots (choose axes, colour, bubble size), category summary bars, distribution box plots, a quick-win leaderboard, a similarity cluster explorer, and a revamped Opportunity Finder. The latter now exposes demand dissatisfaction (raw and percentile scores), execution floor controls (success score or success-per-week), cohort metric cards, concise result tables with expandable snapshots, embedded “similar apps” suggestions, and per-category standouts. The sidebar can be widened by tweaking the injected CSS in `apps/local/streamlit_app.py`.
+- Hosted demo: visit [discovering-apps-jack.streamlit.app](https://discovering-apps-jack.streamlit.app) (cloud-backed) to explore the dashboard without running it locally. The hosted instance uses `apps/cloud/streamlit_app_cloud.py`, which reads from the remote SQLiteCloud database.
+- Neon-backed prototype: `streamlit run apps/cloud/streamlit_app_neon.py` reads directly from the Neon PostgreSQL database (set `PROTOTYPE_DATABASE_URL` or `NEON_DATABASE_URL` before launching).
 - Hover a point to inspect the app’s scores, ratings volume, review average, and price. Toggle categories via the legend to declutter the view. The shaded quadrant highlights quick wins (high success score, low build effort).
 
 ## Similarity embeddings (experimental)
@@ -159,7 +158,7 @@ Generate text embeddings for snapshot descriptions to group comparable apps or b
 
 ```bash
 export OPENAI_API_KEY=sk-...
-python analysis/generate_embeddings.py --batch-size 50 --run-id 12
+python -m src.local.analysis.generate_embeddings --batch-size 50 --run-id 12
 ```
 
 Key details:
@@ -171,17 +170,17 @@ Key details:
 Compute nearest-neighbour tables (used by the Streamlit Opportunity Finder):
 
 ```bash
-python analysis/build_neighbors.py --run-id 12 --top-k 5
+python -m src.local.analysis.build_neighbors --run-id 12 --top-k 5
 ```
 
-- Uses the embeddings from `analysis/generate_embeddings.py` (defaults to `text-embedding-3-small`).
+- Uses the embeddings from `src/local/analysis/generate_embeddings.py` (defaults to `text-embedding-3-small`).
 - Writes results into `app_snapshot_neighbors` with similarity scores, refreshed per run or across all runs (`--all-runs`).
 - Tune `--min-similarity` or `--top-k` to balance precision vs breadth.
 
 Build keyword-labelled clusters for the Streamlit similarity tab:
 
 ```bash
-python analysis/build_clusters.py --clusters 20 --all-runs
+python -m src.local.analysis.build_clusters --clusters 20 --all-runs
 ```
 
 - Clusters leverage normalised embeddings; keywords are extracted from member descriptions (basic stop-word filtering included).
@@ -190,34 +189,62 @@ python analysis/build_clusters.py --clusters 20 --all-runs
 
 ### Cloud workflow
 
-For the hosted dashboard, use the cloud-specific scripts (they target the SQLiteCloud database defined in `cloud_config.py`).
+For the hosted dashboard, use the cloud-specific scripts (they target the SQLiteCloud database defined in `config/cloud.py`).
 
 Typical end-to-end refresh:
 
 ```bash
 # Example: refresh top-free all categories in the cloud DB
-./run_cloud_pipeline_cloud.sh --collection top-free --all-categories --country us --limit 100 --note "Top free cloud refresh"
+./pipelines/cloud/run_cloud_pipeline.sh --collection top-free --all-categories --country us --limit 100 --note "Top free cloud refresh"
 ```
 
 The helper script executes:
-- `app_store_scraper_v2_cloud.py` – Stage 1 scrape into SQLiteCloud.
-- `app_stage2_analysis_cloud.py` – Stage 2 scoring.
-- `scripts/reuse_stage2_scores_cloud.py` – Reuse prior Stage 2 scores before re-scoring.
-- `analysis/build_deltas_cloud.py` – Snapshot deltas.
-- `analysis/generate_embeddings_cloud.py` – Embeddings.
-- `analysis/build_neighbors_cloud.py` – Similarity neighbours.
-- `analysis/build_clusters_cloud.py` – Cluster labels.
+- `src/cloud/stage1/app_store_scraper_v2_cloud.py` – Stage 1 scrape into SQLiteCloud.
+- `src/cloud/stage2/app_stage2_analysis_cloud.py` – Stage 2 scoring.
+- `src/cloud/scripts/reuse_stage2_scores_cloud.py` – Reuse prior Stage 2 scores before re-scoring.
+- `src/cloud/analysis/build_deltas_cloud.py` – Snapshot deltas.
+- `src/cloud/analysis/generate_embeddings_cloud.py` – Embeddings.
+- `src/cloud/analysis/build_neighbors_cloud.py` – Similarity neighbours.
+- `src/cloud/analysis/build_clusters_cloud.py` – Cluster labels.
 
 Adjust flags as needed (e.g., run multiple scrapes separately for top-paid, keyword searches, etc.).
+
+## Prototype: Neon/PostgreSQL Migration
+
+The `src/prototype/` package provides a path to run the full pipeline on Postgres (e.g., a Neon project) instead of SQLite.
+
+1. **Provision the database**  
+   Create a Neon branch/database and copy the connection string. For local development you can tunnel through the Neon VS Code extension or run the local proxy (example DSN: `postgres://neon:npg@localhost:5432/<database_name>`). Export it as `PROTOTYPE_DATABASE_URL`.
+
+2. **Create the schema**  
+   Run `exports/schema_postgres.sql` against your Neon database (via the Neon SQL console or `psql`):  
+   ```bash
+   psql "$PROTOTYPE_DATABASE_URL" -f exports/schema_postgres.sql
+   ```
+
+3. **Copy data from SQLite**  
+   Use the migration helper to bulk copy the existing `exports/app_store_apps_v2.db` into Postgres:  
+   ```bash
+   python -m src.prototype.migrate_sqlite_to_postgres
+   ```
+   The script ensures the schema exists (unless disabled), truncates destination tables, and inserts rows in batches. Pass `--postgres-dsn` if you prefer not to rely on the environment variable.  
+   If you’d rather use `pgloader`, customize `src/prototype/pgloader.load.template` with absolute paths and the Neon DSN, then run `pgloader`.
+
+4. **Point tooling at Neon**  
+   Once migrated, you can connect the Streamlit app or Stage 2 scripts to Postgres by reading from `PROTOTYPE_DATABASE_URL` (future prototype work will add direct Postgres entry points). Until then, SQLite remains the default for the main pipeline.
+
+5. **Neon-native scraper (optional)**  
+   `python -m src.prototype.app_store_scraper_neon --collection top-free --all-categories --limit 400`  
+   pulls up to the top 400 apps per category directly into Neon (the script falls back to whatever the feed exposes if fewer than 400 entries exist). Supply `--search-term` for keyword scrapes.
 
 ## Next steps
 - Schedule recurring Stage 1 scrapes (cron, CI) so your dataset stays fresh.
 - Feed the Stage 2 scores into downstream analyses (e.g., prioritisation dashboards or deeper GPT summaries).
 
 ## Workflow guidance
-1. Run Stage 1 to refresh the SQLite database (`app_store_scraper.py`).
-2. Run Stage 2 to score new rows (`app_stage2_analysis.py`).
-3. Re-generate visuals or view the Streamlit dashboard to analyse quick wins.
+1. Run Stage 1 to refresh the SQLite database (`python -m src.local.stage1.app_store_scraper` or `..._v2`).
+2. Run Stage 2 to score new rows (`python -m src.local.stage2.app_stage2_analysis`).
+3. Re-generate visuals (`python -m apps.local.visualize_scores*`) or view the Streamlit dashboard to analyse quick wins.
 
 ## Contributing & license
 - Pull requests/issues welcomed for bug fixes, new data sources, or visualisations.
