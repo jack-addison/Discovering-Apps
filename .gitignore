@@ -1,14 +1,8 @@
 .venv/
 __pycache__/
-# Large exports (databases, CSV dumps)
-exports/*.db
-exports/**/*.db
+# exports/*.db
 exports/*.sqlite
-exports/**/*.sqlite
 exports/*.csv
-exports/**/*.csv
-exports/app_store_apps_v2.db archive
-exports/features/
 visualizations/*.png
 visualizations/*.html
 .streamlit/
