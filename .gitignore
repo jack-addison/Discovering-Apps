@@ -7,3 +7,4 @@ visualizations/*.png
 visualizations/*.html
 .streamlit/
 .env
+.DS_Store

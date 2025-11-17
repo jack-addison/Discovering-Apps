@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 import plotly.express as px
@@ -21,6 +21,39 @@ if str(REPO_ROOT) not in sys.path:
 
 NEON_DATABASE_URL = os.environ.get("PROTOTYPE_DATABASE_URL") or os.environ.get("NEON_DATABASE_URL")
 CACHE_TTL_SECONDS = 300
+
+HISTORY_METRICS = {
+    "avg_rating": {
+        "label": "Average rating",
+        "column": "average_user_rating",
+        "y_label": "Average rating",
+        "snapshot_column": "average_user_rating",
+    },
+    "rating_count": {
+        "label": "Rating count",
+        "column": "user_rating_count",
+        "y_label": "User rating count",
+        "snapshot_column": "user_rating_count",
+    },
+    "delta_rating": {
+        "label": "Δ rating",
+        "column": "delta_rating",
+        "y_label": "Rating change vs prior run",
+        "snapshot_column": None,
+    },
+    "delta_rating_count": {
+        "label": "Δ rating count",
+        "column": "delta_rating_count",
+        "y_label": "Rating-count change vs prior run",
+        "snapshot_column": None,
+    },
+    "best_rank": {
+        "label": "Best rank",
+        "column": "best_rank",
+        "y_label": "Best observed rank",
+        "snapshot_column": "best_rank",
+    },
+}
 
 
 @st.cache_resource
@@ -153,6 +186,50 @@ def load_dissatisfied_counts() -> pd.DataFrame:
     if df.empty:
         return df
     df["run_created_at"] = pd.to_datetime(df["run_created_at"], errors="coerce")
+    return df
+
+
+def _build_in_clause(prefix: str, items: Sequence[int]) -> Tuple[str, Dict[str, int]]:
+    placeholders = []
+    params: Dict[str, int] = {}
+    for idx, value in enumerate(items):
+        key = f"{prefix}{idx}"
+        placeholders.append(f":{key}")
+        params[key] = int(value)
+    return ", ".join(placeholders), params
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
+def load_app_history(track_ids: Tuple[int, ...], metric_key: str) -> pd.DataFrame:
+    if not track_ids or metric_key not in HISTORY_METRICS:
+        return pd.DataFrame()
+    metric = HISTORY_METRICS[metric_key]
+    column = metric["column"]
+    placeholders, params = _build_in_clause("tid", track_ids)
+    query = f"""
+        SELECT track_id, name, run_created_at, {column} AS metric_value
+        FROM app_snapshot_deltas
+        WHERE track_id IN ({placeholders})
+        ORDER BY run_created_at ASC
+    """
+    with get_engine().connect() as conn:
+        df = pd.read_sql_query(text(query), conn, params=params)
+        if df.empty and metric.get("snapshot_column"):
+            snap_column = metric["snapshot_column"]
+            query_snap = f"""
+                SELECT track_id, name, scraped_at AS run_created_at, {snap_column} AS metric_value
+                FROM app_snapshots
+                WHERE track_id IN ({placeholders})
+                ORDER BY scraped_at ASC
+            """
+            df = pd.read_sql_query(text(query_snap), conn, params=params)
+
+    if df.empty:
+        return df
+    df["run_created_at"] = pd.to_datetime(df["run_created_at"], errors="coerce")
+    df.dropna(subset=["run_created_at"], inplace=True)
+    df["metric_value"] = pd.to_numeric(df["metric_value"], errors="coerce")
+    df.dropna(subset=["metric_value"], inplace=True)
     return df
 
 
@@ -327,6 +404,120 @@ def render_clusters_tab() -> None:
         },
     )
 
+    st.divider()
+    st.markdown("#### Compare selected apps over time")
+    option_records = member_rows[["track_id", "name"]].drop_duplicates().sort_values("name")
+    option_ids = option_records["track_id"].astype(int).tolist()
+    name_lookup = {int(row["track_id"]): row["name"] for _, row in option_records.iterrows()}
+    default_selection = option_ids[: min(3, len(option_ids))]
+    selected_track_ids = st.multiselect(
+        "Apps to compare",
+        options=option_ids,
+        default=default_selection,
+        format_func=lambda tid: name_lookup.get(tid, str(tid)),
+        help="Pick a few apps to visualize their history (based on snapshot deltas).",
+        key=f"cluster_compare_select_{cluster_id}",
+    )
+
+    metric_keys = list(HISTORY_METRICS.keys())
+    metric_labels = {key: cfg["label"] for key, cfg in HISTORY_METRICS.items()}
+    metric_choice = st.selectbox(
+        "Metric",
+        options=metric_keys,
+        format_func=lambda key: metric_labels.get(key, key),
+        key=f"cluster_compare_metric_{cluster_id}",
+    )
+
+    show_avg = st.checkbox(
+        "Show average of selected apps",
+        value=True,
+        key=f"cluster_compare_avg_{cluster_id}",
+    )
+
+    if selected_track_ids:
+        history_df = load_app_history(tuple(sorted(selected_track_ids)), metric_choice)
+        if history_df.empty:
+            st.info("No historical data found for the selected apps yet. Run the delta builder to populate history.")
+        else:
+            min_ts = history_df["run_created_at"].min()
+            max_ts = history_df["run_created_at"].max()
+            if pd.isna(min_ts) or pd.isna(max_ts):
+                st.warning("Historical timestamps are missing for the chosen metric.")
+            else:
+                min_dt = min_ts.to_pydatetime()
+                max_dt = max_ts.to_pydatetime()
+                if min_dt == max_dt:
+                    date_range = (min_dt, max_dt)
+                else:
+                    date_range = st.slider(
+                        "Date range",
+                        min_value=min_dt,
+                        max_value=max_dt,
+                        value=(min_dt, max_dt),
+                        key=f"cluster_compare_range_{cluster_id}",
+                    )
+                history_filtered = history_df[
+                    (history_df["run_created_at"] >= pd.Timestamp(date_range[0]))
+                    & (history_df["run_created_at"] <= pd.Timestamp(date_range[1]))
+                ].copy()
+                if history_filtered.empty:
+                    st.warning("No data points fall within the selected date range.")
+                else:
+                    history_filtered["name"] = history_filtered.apply(
+                        lambda row: name_lookup.get(int(row["track_id"]), row["name"]), axis=1
+                    )
+                    plot_df = history_filtered.copy()
+                    if show_avg and not history_filtered.empty:
+                        avg_series = (
+                            history_filtered.groupby("run_created_at", as_index=False)["metric_value"].mean()
+                        )
+                        avg_series["name"] = "Selected average"
+                        avg_series["track_id"] = 0
+                        plot_df = pd.concat([plot_df, avg_series], ignore_index=True, sort=False)
+                    y_label = HISTORY_METRICS.get(metric_choice, {}).get("y_label", "Value")
+                    fig_history = px.line(
+                        plot_df,
+                        x="run_created_at",
+                        y="metric_value",
+                        color="name",
+                        markers=True,
+                        title=f"{y_label} over time",
+                    )
+                    fig_history.update_layout(
+                        xaxis_title="Run timestamp",
+                        yaxis_title=y_label,
+                        legend_title="App",
+                        hovermode="x unified",
+                    )
+                    st.plotly_chart(fig_history, use_container_width=True, config={"displayModeBar": False})
+
+                    latest = (
+                        history_filtered.sort_values("run_created_at")
+                        .groupby("track_id", as_index=False)
+                        .tail(1)
+                        .copy()
+                    )
+                    latest["name"] = latest["track_id"].map(name_lookup).fillna(latest["name"])
+                    summary = latest.rename(
+                        columns={
+                            "name": "App",
+                            "run_created_at": "Last run",
+                            "metric_value": metric_labels.get(metric_choice, "Value"),
+                        }
+                    )
+                    st.dataframe(summary[["App", "Last run", metric_labels.get(metric_choice, "Value")]], hide_index=True)
+                    csv_data = history_filtered.rename(columns={"metric_value": metric_labels.get(metric_choice, "Value")})
+                    st.download_button(
+                        "Download history CSV",
+                        data=csv_data.to_csv(index=False).encode("utf-8"),
+                        file_name=f"cluster_{cluster_id}_history.csv",
+                        mime="text/csv",
+                        help="Export the selected apps' timeline for deeper analysis.",
+                        key=f"cluster_compare_download_{cluster_id}",
+                    )
+    else:
+        st.info("Select at least one app to compare.")
+
 
 def render_apps_tab() -> None:
     app_names = load_app_names()
@@ -360,29 +551,29 @@ def render_deltas_tab() -> None:
         return
 
     metric_config = {
-        "Rating average": {
-            "col": "delta_rating",
-            "label": "Δ rating",
-            "run_title": "Average Δ rating by run",
-            "run_ylabel": "Avg Δ rating",
-            "category_title": "Top categories by avg Δ rating",
-            "improve_title": "Top positive movers (rating)",
-            "decline_title": "Top negative movers (rating)",
-            "improve_sort": lambda df: df.nlargest(10, "delta_rating"),
-            "decline_sort": lambda df: df.nsmallest(10, "delta_rating"),
-            "note": "Positive values indicate improving user ratings.",
+        "Rank change": {
+            "col": "delta_rank",
+            "label": "Δ rank",
+            "run_title": "Average rank change by calendar date",
+            "run_ylabel": "Avg Δ rank",
+            "category_title": "Categories with biggest avg rank shifts",
+            "improve_title": "Top climbers (rank improved)",
+            "decline_title": "Biggest drops (rank worsened)",
+            "improve_sort": lambda df: df.nsmallest(10, "delta_rank"),
+            "decline_sort": lambda df: df.nlargest(10, "delta_rank"),
+            "note": "Negative values mean the app moved higher (lower chart position).",
         },
-        "Rating count": {
-            "col": "delta_rating_count",
-            "label": "Δ rating count",
-            "run_title": "Average Δ rating count by run",
-            "run_ylabel": "Avg Δ rating count",
-            "category_title": "Top categories by avg Δ rating count",
-            "improve_title": "Top positive movers (rating volume)",
-            "decline_title": "Top negative movers (rating volume)",
-            "improve_sort": lambda df: df.nlargest(10, "delta_rating_count"),
-            "decline_sort": lambda df: df.nsmallest(10, "delta_rating_count"),
-            "note": "Positive values mean the app accumulated more ratings since the prior run.",
+        "Best rank": {
+            "col": "best_rank",
+            "label": "Avg best rank",
+            "run_title": "Average best rank by calendar date",
+            "run_ylabel": "Avg best rank",
+            "category_title": "Categories with strongest average ranks",
+            "improve_title": "Top-ranked apps",
+            "decline_title": "Apps with weakest ranks",
+            "improve_sort": lambda df: df.nsmallest(10, "best_rank"),
+            "decline_sort": lambda df: df.nlargest(10, "best_rank"),
+            "note": "Lower values indicate higher placement in the charts.",
         },
     }
 
@@ -393,23 +584,31 @@ def render_deltas_tab() -> None:
         horizontal=True,
     )
     config = metric_config[metric_choice]
-    delta_col = config["col"]
+    metric_col = config["col"]
 
     comparables = view[~view["is_new_track"]].copy()
     col_a, col_b, col_c, col_d = st.columns(4)
-    avg_delta = comparables[delta_col].dropna().mean()
-    col_a.metric(config["label"], f"{avg_delta:+.3f}" if pd.notna(avg_delta) else "--", help=config["note"])
-    avg_rating_delta = comparables["delta_rating"].dropna().mean()
-    col_b.metric("Avg Δ rating (all)", f"{avg_rating_delta:+.3f}" if pd.notna(avg_rating_delta) else "--")
+    avg_metric = comparables[metric_col].dropna().mean()
+    if pd.notna(avg_metric):
+        display_value = f"{avg_metric:+.2f}" if metric_col == "delta_rank" else f"{avg_metric:.2f}"
+    else:
+        display_value = "--"
+    col_a.metric(config["label"], display_value, help=config["note"])
+    avg_rank_delta = comparables["delta_rank"].dropna().mean()
+    col_b.metric(
+        "Avg Δ rank (all)",
+        f"{avg_rank_delta:+.2f}" if pd.notna(avg_rank_delta) else "--",
+        help="Negative values mean the cohort is climbing the charts.",
+    )
     col_c.metric("New apps this window", int(view["is_new_track"].sum()))
     median_gap = comparables["days_since_prev"].dropna().median()
     col_d.metric("Median days between runs", f"{median_gap:.1f}" if pd.notna(median_gap) else "--")
 
     comparables["run_date"] = comparables["run_created_at"].dt.date
     run_summary = (
-        comparables.dropna(subset=[delta_col])
+        comparables.dropna(subset=[metric_col])
         .groupby(["run_date"], as_index=False)
-        .agg(avg_delta=(delta_col, "mean"), returning_apps=("track_id", "count"))
+        .agg(avg_delta=(metric_col, "mean"), returning_apps=("track_id", "count"))
         .sort_values("run_date")
     )
     if not run_summary.empty:
@@ -424,10 +623,10 @@ def render_deltas_tab() -> None:
         st.plotly_chart(fig_runs, use_container_width=True, config={"displayModeBar": False})
 
     cat_summary = (
-        comparables.dropna(subset=[delta_col])
+        comparables.dropna(subset=[metric_col])
         .groupby("category", as_index=False)
-        .agg(avg_delta=(delta_col, "mean"), apps=("track_id", "count"))
-        .sort_values("avg_delta", ascending=False)
+        .agg(avg_delta=(metric_col, "mean"), apps=("track_id", "count"))
+        .sort_values("avg_delta", ascending=True if metric_col in {"delta_rank", "best_rank"} else False)
     )
     if not cat_summary.empty:
         fig_cat = px.bar(
@@ -441,21 +640,20 @@ def render_deltas_tab() -> None:
         st.plotly_chart(fig_cat, use_container_width=True, config={"displayModeBar": False})
 
     col_gain, col_loss = st.columns(2)
-    top_gain = config["improve_sort"](comparables).copy()
+    top_gain = config["improve_sort"](comparables.dropna(subset=[metric_col])).copy()
     col_gain.markdown(f"**{config['improve_title']}**")
+    table_cols = ["run_id", "track_id", "name", "category", metric_col, "best_rank"]
+    display_gain = top_gain[table_cols].rename(columns={metric_col: config["label"], "best_rank": "Best rank"})
     col_gain.dataframe(
-        top_gain[
-            ["run_id", "track_id", "name", "category", delta_col, "average_user_rating", "user_rating_count"]
-        ].rename(columns={delta_col: config["label"]}),
+        display_gain,
         hide_index=True,
         use_container_width=True,
     )
-    top_loss = config["decline_sort"](comparables).copy()
+    top_loss = config["decline_sort"](comparables.dropna(subset=[metric_col])).copy()
     col_loss.markdown(f"**{config['decline_title']}**")
+    display_loss = top_loss[table_cols].rename(columns={metric_col: config["label"], "best_rank": "Best rank"})
     col_loss.dataframe(
-        top_loss[
-            ["run_id", "track_id", "name", "category", delta_col, "average_user_rating", "user_rating_count"]
-        ].rename(columns={delta_col: config["label"]}),
+        display_loss,
         hide_index=True,
         use_container_width=True,
     )
