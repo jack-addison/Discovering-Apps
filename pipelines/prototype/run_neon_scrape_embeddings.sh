@@ -43,4 +43,7 @@ python -m src.prototype.analysis.cluster_all \
   --min-cluster-size 4 \
   --top-keywords 6
 
+echo ">>> Rebuilding snapshot deltas..."
+python -m src.prototype.analysis.build_deltas_neon
+
 echo "Pipeline complete."

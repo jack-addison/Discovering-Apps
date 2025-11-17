@@ -263,7 +263,7 @@ def render_clusters_tab() -> None:
     edited = st.data_editor(
         overview.head(200),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Inspect": st.column_config.CheckboxColumn(
                 help="Check a cluster to preview its members below.",
@@ -359,7 +359,7 @@ def render_clusters_tab() -> None:
     st.dataframe(
         top_opportunities,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Avg rating": st.column_config.NumberColumn(format="%.2f"),
             "Rating count": st.column_config.NumberColumn(format="%d"),
@@ -395,7 +395,7 @@ def render_clusters_tab() -> None:
     st.dataframe(
         display,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Avg rating": st.column_config.NumberColumn(format="%.2f"),
             "Rating count": st.column_config.NumberColumn(format="%d"),
@@ -489,7 +489,7 @@ def render_clusters_tab() -> None:
                         legend_title="App",
                         hovermode="x unified",
                     )
-                    st.plotly_chart(fig_history, use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(fig_history, width="stretch", config={"displayModeBar": False})
 
                     latest = (
                         history_filtered.sort_values("run_created_at")
@@ -620,7 +620,7 @@ def render_deltas_tab() -> None:
             title=config["run_title"],
         )
         fig_runs.update_layout(xaxis_title="Calendar date", yaxis_title=config["run_ylabel"])
-        st.plotly_chart(fig_runs, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_runs, width="stretch", config={"displayModeBar": False})
 
     cat_summary = (
         comparables.dropna(subset=[metric_col])
@@ -637,7 +637,7 @@ def render_deltas_tab() -> None:
             title=config["category_title"],
         )
         fig_cat.update_layout(xaxis_title="Category", yaxis_title=config["run_ylabel"])
-        st.plotly_chart(fig_cat, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_cat, width="stretch", config={"displayModeBar": False})
 
     col_gain, col_loss = st.columns(2)
     top_gain = config["improve_sort"](comparables.dropna(subset=[metric_col])).copy()
@@ -647,7 +647,7 @@ def render_deltas_tab() -> None:
     col_gain.dataframe(
         display_gain,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
     top_loss = config["decline_sort"](comparables.dropna(subset=[metric_col])).copy()
     col_loss.markdown(f"**{config['decline_title']}**")
@@ -655,7 +655,7 @@ def render_deltas_tab() -> None:
     col_loss.dataframe(
         display_loss,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
     timeline_df = load_dissatisfied_counts()
@@ -671,7 +671,7 @@ def render_deltas_tab() -> None:
             title="Flagged dissatisfied apps per run",
         )
         fig_flagged.update_layout(xaxis_title="Calendar date", yaxis_title="# dissatisfied apps")
-        st.plotly_chart(fig_flagged, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_flagged, width="stretch", config={"displayModeBar": False})
 
 
 def main() -> None:

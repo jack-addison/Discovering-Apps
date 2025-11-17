@@ -609,7 +609,7 @@ def render_similarity_clusters(
     edited_clusters = st.data_editor(
         top_clusters.head(200),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Inspect": st.column_config.CheckboxColumn(
                 help="Check a cluster to preview its members below.",
@@ -673,7 +673,7 @@ def render_similarity_clusters(
     st.dataframe(
         member_display,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Similarity %": st.column_config.NumberColumn(format="%.1f"),
             "Success": st.column_config.NumberColumn(format="%.0f"),

@@ -56,7 +56,7 @@ def ensure_table(conn: psycopg.Connection, recreate: bool) -> None:
                 price DOUBLE PRECISION,
                 currency TEXT,
                 average_user_rating DOUBLE PRECISION,
-                user_rating_count INTEGER,
+                user_rating_count DOUBLE PRECISION,
                 build_time_estimate DOUBLE PRECISION,
                 success_score DOUBLE PRECISION,
                 success_reasoning TEXT,
@@ -64,7 +64,7 @@ def ensure_table(conn: psycopg.Connection, recreate: bool) -> None:
                 description TEXT,
                 version TEXT,
                 developer TEXT,
-                prev_run_id INTEGER,
+                prev_run_id DOUBLE PRECISION,
                 prev_run_created_at TIMESTAMPTZ,
                 prev_success_score DOUBLE PRECISION,
                 prev_build_time DOUBLE PRECISION,
@@ -133,6 +133,21 @@ def write_output(conn: psycopg.Connection, df: pd.DataFrame) -> None:
         if col in working.columns:
             working[col] = working[col].apply(lambda x: x.tz_localize(None) if isinstance(x, pd.Timestamp) and x.tzinfo else x)
             working[col] = working[col].apply(lambda x: x.isoformat() if pd.notna(x) else None)
+    for bool_col in ["is_new_track", "price_changed"]:
+        if bool_col in working.columns:
+            working[bool_col] = working[bool_col].apply(
+                lambda val: bool(val) if pd.notna(val) else None
+            )
+    for int_col in ["run_id", "track_id"]:
+        if int_col in working.columns:
+            working[int_col] = working[int_col].apply(
+                lambda val: int(val) if pd.notna(val) else None
+            )
+    for float_col in ["user_rating_count", "prev_rating_count", "delta_rating_count", "prev_run_id"]:
+        if float_col in working.columns:
+            working[float_col] = working[float_col].apply(
+                lambda val: float(val) if pd.notna(val) else None
+            )
     working = working.replace({pd.NA: None})
     records = working.to_dict("records")
     insert_sql = """
@@ -191,7 +206,15 @@ def write_output(conn: psycopg.Connection, df: pd.DataFrame) -> None:
         cur.execute("DELETE FROM app_snapshot_deltas")
         chunk = 500
         for start in range(0, len(records), chunk):
-            cur.executemany(insert_sql, records[start : start + chunk])
+            batch = records[start : start + chunk]
+            try:
+                cur.executemany(insert_sql, batch)
+            except psycopg.errors.NumericValueOutOfRange as exc:
+                diag = getattr(exc, "diag", None)
+                column = getattr(diag, "column_name", None) if diag else None
+                offending = batch[:1]
+                logging.error("Numeric overflow while inserting deltas (column=%s, sample=%s)", column, offending)
+                raise
         conn.commit()
 
 
