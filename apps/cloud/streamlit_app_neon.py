@@ -189,6 +189,28 @@ def load_dissatisfied_counts() -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
+def load_recent_run_counts(days: int = 14) -> pd.DataFrame:
+    query = text(
+        """
+        SELECT
+            DATE(created_at AT TIME ZONE 'UTC') AS run_date,
+            COUNT(*) AS runs
+        FROM scrape_runs
+        WHERE created_at >= NOW() - (:days * INTERVAL '1 day')
+        GROUP BY run_date
+        ORDER BY run_date
+        """
+    )
+    with get_engine().connect() as conn:
+        df = pd.read_sql_query(query, conn, params={"days": days})
+    if df.empty:
+        return df
+    df["run_date"] = pd.to_datetime(df["run_date"], errors="coerce")
+    df["run_date_label"] = df["run_date"].dt.strftime("%Y-%m-%d")
+    return df
+
+
 def _build_in_clause(prefix: str, items: Sequence[int]) -> Tuple[str, Dict[str, int]]:
     placeholders = []
     params: Dict[str, int] = {}
@@ -525,6 +547,20 @@ def render_apps_tab() -> None:
         st.info("No apps found. Run the scraper first.")
         return
     st.selectbox("All apps", options=app_names, index=0, label_visibility="visible")
+    run_counts = load_recent_run_counts()
+    st.markdown("#### Runs per day (last 14 days)")
+    if run_counts.empty:
+        st.info("No runs recorded in the last two weeks.")
+    else:
+        fig_runs = px.bar(
+            run_counts,
+            x="run_date_label",
+            y="runs",
+            title="Run frequency",
+            labels={"run_date_label": "Calendar date", "runs": "# of runs"},
+        )
+        fig_runs.update_layout(bargap=0.2)
+        st.plotly_chart(fig_runs, width="stretch", config={"displayModeBar": False})
 
 
 def render_deltas_tab() -> None:
