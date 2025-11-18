@@ -243,6 +243,9 @@ The `src/prototype/` package provides a path to run the full pipeline on Postgre
 6. **Snapshot deltas in Neon**  
    `python -m src.prototype.analysis.build_deltas_neon`  
    recomputes run-to-run changes (ratings, price, etc.) inside Postgres so the Streamlit deltas tab has fresh data.
+7. **UMAP opportunity map**  
+   `python -m src.prototype.analysis.build_umap --scope-label all --model text-embedding-3-small`  
+   projects the latest embeddings into 2‑D coordinates stored in `app_snapshot_umap`. The Neon Streamlit app uses these to render the “Map” tab so you can visually scan for dissatisfied-but-popular clusters.
 
 ### Dissatisfied app pipeline (Neon)
 

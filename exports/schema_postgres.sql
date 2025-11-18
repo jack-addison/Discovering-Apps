@@ -151,6 +151,21 @@ CREATE TABLE IF NOT EXISTS app_snapshot_deltas (
 CREATE INDEX IF NOT EXISTS idx_app_deltas_track ON app_snapshot_deltas(track_id);
 CREATE INDEX IF NOT EXISTS idx_app_deltas_run ON app_snapshot_deltas(run_id);
 
+CREATE TABLE IF NOT EXISTS app_snapshot_umap (
+    run_id INTEGER NOT NULL,
+    track_id BIGINT NOT NULL,
+    model TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    umap_x DOUBLE PRECISION NOT NULL,
+    umap_y DOUBLE PRECISION NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (scope, model, track_id),
+    UNIQUE (scope, model, run_id, track_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_umap_model_scope ON app_snapshot_umap(model, scope);
+CREATE INDEX IF NOT EXISTS idx_app_umap_run ON app_snapshot_umap(run_id);
+
 CREATE TABLE IF NOT EXISTS app_snapshot_dissatisfied (
     run_id INTEGER NOT NULL,
     track_id BIGINT NOT NULL,

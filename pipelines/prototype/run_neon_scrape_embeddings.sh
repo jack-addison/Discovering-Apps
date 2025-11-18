@@ -43,6 +43,13 @@ python -m src.prototype.analysis.cluster_all \
   --min-cluster-size 4 \
   --top-keywords 6
 
+echo ">>> Building UMAP projection..."
+python -m src.prototype.analysis.build_umap \
+  --scope-label all \
+  --model text-embedding-3-small \
+  --run-id "$(psql "$PROTOTYPE_DATABASE_URL" -At -c 'SELECT id FROM scrape_runs ORDER BY id DESC LIMIT 1')" \
+  --run-id "$(psql "$PROTOTYPE_DATABASE_URL" -At -c 'SELECT id FROM scrape_runs ORDER BY id DESC OFFSET 1 LIMIT 1')"
+
 echo ">>> Rebuilding snapshot deltas..."
 python -m src.prototype.analysis.build_deltas_neon
 

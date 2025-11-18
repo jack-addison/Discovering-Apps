@@ -7,3 +7,4 @@ streamlit>=1.39.0
 sqlitecloud
 psycopg[binary]>=3.1.15
 sqlalchemy>=2.0.0
+umap-learn>=0.5.6

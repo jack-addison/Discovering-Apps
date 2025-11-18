@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 
 NEON_DATABASE_URL = os.environ.get("PROTOTYPE_DATABASE_URL") or os.environ.get("NEON_DATABASE_URL")
 CACHE_TTL_SECONDS = 300
+DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 
 HISTORY_METRICS = {
     "avg_rating": {
@@ -208,6 +209,43 @@ def load_recent_run_counts(days: int = 14) -> pd.DataFrame:
         return df
     df["run_date"] = pd.to_datetime(df["run_date"], errors="coerce")
     df["run_date_label"] = df["run_date"].dt.strftime("%Y-%m-%d")
+    return df
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
+def load_umap_points(scope: str, model: str = DEFAULT_EMBED_MODEL) -> pd.DataFrame:
+    query = text(
+        """
+        SELECT
+            u.run_id,
+            u.track_id,
+            u.umap_x,
+            u.umap_y,
+            s.name,
+            s.primary_genre_name AS category,
+            s.price,
+            s.currency,
+            s.average_user_rating,
+            s.user_rating_count,
+            cm.cluster_id
+        FROM app_snapshot_umap u
+        JOIN app_snapshots s
+          ON s.run_id = u.run_id
+         AND s.track_id = u.track_id
+        LEFT JOIN app_snapshot_cluster_members cm
+          ON cm.run_id = u.run_id
+         AND cm.track_id = u.track_id
+        WHERE u.scope = :scope
+          AND u.model = :model
+        """
+    )
+    with get_engine().connect() as conn:
+        df = pd.read_sql_query(query, conn, params={"scope": scope, "model": model})
+    if df.empty:
+        return df
+    df["user_rating_count"] = pd.to_numeric(df["user_rating_count"], errors="coerce")
+    df["average_user_rating"] = pd.to_numeric(df["average_user_rating"], errors="coerce")
+    df["price_label"] = df["price"].fillna(0).map(lambda price: "Free" if price == 0 else f"${price:.2f}")
     return df
 
 
@@ -563,6 +601,120 @@ def render_apps_tab() -> None:
         st.plotly_chart(fig_runs, width="stretch", config={"displayModeBar": False})
 
 
+def render_map_tab() -> None:
+    scopes = load_scopes()
+    if not scopes:
+        st.info("No clusters or projection data available yet.")
+        return
+    scope = st.selectbox("Projection scope", scopes, index=0, key="umap_scope_select")
+    umap_df = load_umap_points(scope)
+    if umap_df.empty:
+        st.info("No UMAP projection found for this scope. Run the UMAP builder first.")
+        return
+
+    rating_threshold = st.slider(
+        "Max average rating to emphasize opportunities",
+        min_value=1.0,
+        max_value=5.0,
+        value=3.0,
+        step=0.1,
+    )
+    default_min_ratings = int(umap_df["user_rating_count"].fillna(0).median() or 0)
+    min_ratings = st.number_input(
+        "Minimum rating count",
+        min_value=0,
+        value=default_min_ratings,
+        step=10,
+        help="Hide tiny apps with very few ratings.",
+    )
+
+    working = umap_df.copy()
+    working = working[working["user_rating_count"].fillna(0) >= min_ratings]
+    if working.empty:
+        st.warning("No apps meet the current rating-count filter.")
+        return
+    working["rating_gap"] = (rating_threshold - working["average_user_rating"]).clip(lower=0)
+    working["opportunity_score"] = working["user_rating_count"].fillna(0) * working["rating_gap"]
+    working["cluster_label"] = working["cluster_id"].fillna(-1).astype(int).astype(str)
+    working["size_metric"] = working["user_rating_count"].fillna(0).clip(lower=1) ** 0.5
+
+    color_options = {
+        "Average rating": ("average_user_rating", "RdYlGn_r"),
+        "Rating count": ("user_rating_count", "Blues"),
+        "Opportunity score": ("opportunity_score", "OrRd"),
+        "Cluster": ("cluster_label", None),
+        "Category": ("category", None),
+    }
+    color_choice = st.selectbox("Colour by", list(color_options.keys()), index=2)
+    color_col, color_scale = color_options[color_choice]
+
+    fig_map = px.scatter(
+        working,
+        x="umap_x",
+        y="umap_y",
+        color=color_col,
+        size="size_metric",
+        size_max=24,
+        title="App landscape (UMAP projection)",
+        hover_name="name",
+        hover_data={
+            "category": True,
+            "price_label": True,
+            "average_user_rating": ":.2f",
+            "user_rating_count": ":,.0f",
+            "opportunity_score": ":,.0f",
+            "umap_x": False,
+            "umap_y": False,
+        },
+    )
+    if color_scale:
+        fig_map.update_traces(marker=dict(colorscale=color_scale))
+    fig_map.update_layout(
+        xaxis=dict(showgrid=False, showticklabels=False, title=""),
+        yaxis=dict(showgrid=False, showticklabels=False, title=""),
+    )
+    st.plotly_chart(fig_map, width="stretch", config={"displayModeBar": False})
+    st.caption(
+        "Points are positioned using UMAP over description embeddings. Size reflects rating volume; colour encodes the selected metric."
+    )
+
+    top_opps = working[working["average_user_rating"].fillna(5.0) <= rating_threshold].copy()
+    if top_opps.empty:
+        st.info("No apps fall below the rating threshold. Adjust the slider to reveal dissatisfied incumbents.")
+        return
+    top_opps = top_opps.sort_values("opportunity_score", ascending=False).head(20)
+    display_cols = top_opps[
+        [
+            "name",
+            "category",
+            "price_label",
+            "average_user_rating",
+            "user_rating_count",
+            "opportunity_score",
+        ]
+    ].rename(
+        columns={
+            "name": "App",
+            "category": "Category",
+            "price_label": "Price",
+            "average_user_rating": "Avg rating",
+            "user_rating_count": "Rating count",
+            "opportunity_score": "Opportunity score",
+        }
+    )
+    st.markdown("#### Top dissatisfied opportunities")
+    st.dataframe(
+        display_cols,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Avg rating": st.column_config.NumberColumn(format="%.2f"),
+            "Rating count": st.column_config.NumberColumn(format="%d"),
+            "Opportunity score": st.column_config.NumberColumn(format="%.0f"),
+        },
+    )
+
+
 def render_deltas_tab() -> None:
     deltas_df = load_deltas_data()
     if deltas_df.empty:
@@ -715,11 +867,13 @@ def main() -> None:
     st.title("Neon Opportunity Explorer")
     st.caption("Clusters derived from Postgres + embeddings.")
 
-    tab_clusters, tab_apps, tab_deltas = st.tabs(["Clusters", "Apps", "Deltas"])
+    tab_clusters, tab_apps, tab_map, tab_deltas = st.tabs(["Clusters", "Apps", "Map", "Deltas"])
     with tab_clusters:
         render_clusters_tab()
     with tab_apps:
         render_apps_tab()
+    with tab_map:
+        render_map_tab()
     with tab_deltas:
         render_deltas_tab()
 
